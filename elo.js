@@ -1,8 +1,3 @@
-let data = {
-    players: {},
-    matches: []
-};
-
 const K_FACTOR = 32;
 const INITIAL_ELO = 1200;
 
@@ -19,35 +14,28 @@ function calculateElo(winnerElo, loserElo) {
     };
 }
 
-async function loadData() {
-    try {
-        const response = await fetch('data.json');
-        if (response.ok) {
-            data = await response.json();
-        } else {
-            console.log('No data file found, using defaults');
-        }
-    } catch (error) {
-        console.log('Error loading data:', error);
-    }
-    updateUI();
+function loadData() {
+    database.ref('players').on('value', (snapshot) => {
+        const players = snapshot.val() || {};
+        updateRankings(players);
+        updatePlayerSelects(players);
+    });
+
+    database.ref('matches').limitToLast(10).on('value', (snapshot) => {
+        const matches = snapshot.val() || {};
+        updateRecentMatches(Object.values(matches));
+    });
 }
 
-function updateUI() {
-    updateRankings();
-    updatePlayerSelects();
-    updateRecentMatches();
-}
-
-function updateRankings() {
+function updateRankings(players) {
     const rankingsDiv = document.getElementById('rankings');
 
-    if (Object.keys(data.players).length === 0) {
+    if (Object.keys(players).length === 0) {
         rankingsDiv.innerHTML = '<p>No players yet. Add a player to get started!</p>';
         return;
     }
 
-    const sortedPlayers = Object.entries(data.players)
+    const sortedPlayers = Object.entries(players)
         .sort((a, b) => b[1].elo - a[1].elo);
 
     let html = `
@@ -75,8 +63,8 @@ function updateRankings() {
                 <td class="${rankClass}">${rank}</td>
                 <td>${name}</td>
                 <td>${player.elo}</td>
-                <td>${player.matches}</td>
-                <td>${player.wins}</td>
+                <td>${player.matches || 0}</td>
+                <td>${player.wins || 0}</td>
                 <td>${winRate}%</td>
             </tr>
         `;
@@ -90,11 +78,11 @@ function updateRankings() {
     rankingsDiv.innerHTML = html;
 }
 
-function updatePlayerSelects() {
+function updatePlayerSelects(players) {
     const winnerSelect = document.getElementById('winner');
     const loserSelect = document.getElementById('loser');
 
-    const playerOptions = Object.keys(data.players)
+    const playerOptions = Object.keys(players)
         .sort()
         .map(name => `<option value="${name}">${name}</option>`)
         .join('');
@@ -103,18 +91,20 @@ function updatePlayerSelects() {
     loserSelect.innerHTML = '<option value="">Select player</option>' + playerOptions;
 }
 
-function updateRecentMatches() {
+function updateRecentMatches(matches) {
     const matchesDiv = document.getElementById('recentMatches');
 
-    if (data.matches.length === 0) {
+    if (!matches || matches.length === 0) {
         matchesDiv.innerHTML = '<p>No matches played yet.</p>';
         return;
     }
 
-    const recentMatches = data.matches.slice(-10).reverse();
+    const sortedMatches = matches.sort((a, b) =>
+        new Date(b.timestamp) - new Date(a.timestamp)
+    );
 
     let html = '';
-    recentMatches.forEach(match => {
+    sortedMatches.forEach(match => {
         const date = new Date(match.timestamp).toLocaleDateString();
         html += `
             <div class="match-item">
@@ -141,66 +131,41 @@ function showMessage(message, type = 'success') {
 }
 
 async function submitMatch(matchData) {
-    const apiUrl = 'https://api.github.com/repos/' + window.location.pathname.split('/')[1] + '/' + window.location.pathname.split('/')[2] + '/dispatches';
-
     try {
-        const response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: {
-                'Accept': 'application/vnd.github.v3+json',
-                'Authorization': 'token ' + prompt('Please enter your GitHub personal access token (with repo scope):')
-            },
-            body: JSON.stringify({
-                event_type: 'update_match',
-                client_payload: matchData
-            })
-        });
+        const playersRef = database.ref('players');
+        const snapshot = await playersRef.once('value');
+        const players = snapshot.val() || {};
 
-        if (response.ok) {
-            showMessage('Match submitted! Rankings will update shortly.');
+        let winner = players[matchData.winner];
+        let loser = players[matchData.loser];
 
-            const winner = data.players[matchData.winner];
-            const loser = data.players[matchData.loser];
-            const newElos = calculateElo(winner.elo, loser.elo);
-
-            winner.elo = newElos.winner;
-            winner.matches++;
-            winner.wins++;
-
-            loser.elo = newElos.loser;
-            loser.matches++;
-
-            data.matches.push({
-                ...matchData,
-                timestamp: new Date().toISOString()
-            });
-
-            updateUI();
-        } else {
-            throw new Error('Failed to submit match');
+        if (!winner || !loser) {
+            showMessage('Players not found. Please add them first.', 'error');
+            return;
         }
-    } catch (error) {
-        showMessage('For now, matches are stored locally. To persist data, set up the GitHub Action.', 'error');
 
-        const winner = data.players[matchData.winner];
-        const loser = data.players[matchData.loser];
         const newElos = calculateElo(winner.elo, loser.elo);
 
-        winner.elo = newElos.winner;
-        winner.matches++;
-        winner.wins++;
+        await database.ref(`players/${matchData.winner}`).update({
+            elo: newElos.winner,
+            matches: (winner.matches || 0) + 1,
+            wins: (winner.wins || 0) + 1
+        });
 
-        loser.elo = newElos.loser;
-        loser.matches++;
+        await database.ref(`players/${matchData.loser}`).update({
+            elo: newElos.loser,
+            matches: (loser.matches || 0) + 1,
+            wins: loser.wins || 0
+        });
 
-        data.matches.push({
+        await database.ref('matches').push({
             ...matchData,
             timestamp: new Date().toISOString()
         });
 
-        updateUI();
-
-        localStorage.setItem('pingpongData', JSON.stringify(data));
+        showMessage('Match submitted successfully!');
+    } catch (error) {
+        showMessage('Error submitting match: ' + error.message, 'error');
     }
 }
 
@@ -228,7 +193,7 @@ document.getElementById('matchForm').addEventListener('submit', async (e) => {
     e.target.reset();
 });
 
-document.getElementById('playerForm').addEventListener('submit', (e) => {
+document.getElementById('playerForm').addEventListener('submit', async (e) => {
     e.preventDefault();
 
     const formData = new FormData(e.target);
@@ -239,28 +204,25 @@ document.getElementById('playerForm').addEventListener('submit', (e) => {
         return;
     }
 
-    if (data.players[playerName]) {
-        showMessage('Player already exists', 'error');
-        return;
+    try {
+        const snapshot = await database.ref(`players/${playerName}`).once('value');
+
+        if (snapshot.exists()) {
+            showMessage('Player already exists', 'error');
+            return;
+        }
+
+        await database.ref(`players/${playerName}`).set({
+            elo: INITIAL_ELO,
+            matches: 0,
+            wins: 0
+        });
+
+        showMessage(`Player ${playerName} added successfully!`);
+        e.target.reset();
+    } catch (error) {
+        showMessage('Error adding player: ' + error.message, 'error');
     }
-
-    data.players[playerName] = {
-        elo: INITIAL_ELO,
-        matches: 0,
-        wins: 0
-    };
-
-    updateUI();
-    showMessage(`Player ${playerName} added successfully!`);
-
-    localStorage.setItem('pingpongData', JSON.stringify(data));
-
-    e.target.reset();
 });
-
-const savedData = localStorage.getItem('pingpongData');
-if (savedData) {
-    data = JSON.parse(savedData);
-}
 
 loadData();

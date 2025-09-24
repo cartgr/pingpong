@@ -69,6 +69,27 @@
         </div>
     </div>
 
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+
+    <script>
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyApPt0veCcYiuU9iR2FeFoEPvsCwXC4xHw",
+            authDomain: "pingpong-tracker-5b379.firebaseapp.com",
+            databaseURL: "https://pingpong-tracker-5b379-default-rtdb.firebaseio.com",
+            projectId: "pingpong-tracker-5b379",
+            storageBucket: "pingpong-tracker-5b379.firebasestorage.app",
+            messagingSenderId: "476047161408",
+            appId: "1:476047161408:web:efcac0a60f5d19e3a007a5"
+        };
+
+        // Initialize Firebase
+        firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+    </script>
+
     <script src="elo.js"></script>
 </body>
 </html>
