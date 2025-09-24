@@ -53,8 +53,6 @@ function updateRankings(players) {
                     <th>Rank</th>
                     <th>Player</th>
                     <th>Elo</th>
-                    <th>Matches</th>
-                    <th>Wins</th>
                     <th>Win Rate</th>
                     ${isAdmin ? '<th>Action</th>' : ''}
                 </tr>
@@ -74,8 +72,6 @@ function updateRankings(players) {
                 <td class="${rankClass}">${rank}</td>
                 <td>${name}</td>
                 <td>${player.elo}</td>
-                <td>${player.matches || 0}</td>
-                <td>${player.wins || 0}</td>
                 <td>${winRate}%</td>
                 ${deleteButton}
             </tr>
