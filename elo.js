@@ -1,6 +1,10 @@
 const K_FACTOR = 32;
 const INITIAL_ELO = 1200;
 
+// Check if admin mode is enabled
+const urlParams = new URLSearchParams(window.location.search);
+const isAdmin = urlParams.get('admin') === 'true';
+
 function calculateElo(winnerElo, loserElo) {
     const expectedWinner = 1 / (1 + Math.pow(10, (loserElo - winnerElo) / 400));
     const expectedLoser = 1 / (1 + Math.pow(10, (winnerElo - loserElo) / 400));
@@ -23,7 +27,11 @@ function loadData() {
 
     database.ref('matches').limitToLast(10).on('value', (snapshot) => {
         const matches = snapshot.val() || {};
-        updateRecentMatches(Object.values(matches));
+        const matchesWithIds = Object.entries(matches).map(([id, match]) => ({
+            ...match,
+            id
+        }));
+        updateRecentMatches(matchesWithIds);
     });
 }
 
@@ -48,6 +56,7 @@ function updateRankings(players) {
                     <th>Matches</th>
                     <th>Wins</th>
                     <th>Win Rate</th>
+                    ${isAdmin ? '<th>Action</th>' : ''}
                 </tr>
             </thead>
             <tbody>
@@ -58,6 +67,8 @@ function updateRankings(players) {
         const rankClass = rank <= 3 ? `rank-${rank}` : '';
         const winRate = player.matches > 0 ? ((player.wins / player.matches) * 100).toFixed(1) : '0.0';
 
+        const deleteButton = isAdmin ? `<td><button class="delete-btn" onclick="deletePlayer('${name}')">Delete</button></td>` : '';
+
         html += `
             <tr>
                 <td class="${rankClass}">${rank}</td>
@@ -66,6 +77,7 @@ function updateRankings(players) {
                 <td>${player.matches || 0}</td>
                 <td>${player.wins || 0}</td>
                 <td>${winRate}%</td>
+                ${deleteButton}
             </tr>
         `;
     }));
@@ -106,13 +118,16 @@ function updateRecentMatches(matches) {
     let html = '';
     sortedMatches.forEach(match => {
         const date = new Date(match.timestamp).toLocaleDateString();
+        const deleteButton = isAdmin ? `<button class="delete-btn" onclick="deleteMatch('${match.id}')">Delete</button>` : '';
         html += `
             <div class="match-item">
                 <div>
                     <strong>${match.winner}</strong> defeated <strong>${match.loser}</strong>
-                    <span class="match-score">${match.winnerScore}-${match.loserScore}</span>
                 </div>
-                <div class="match-date">${date}</div>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <span class="match-date">${date}</span>
+                    ${deleteButton}
+                </div>
             </div>
         `;
     });
@@ -175,8 +190,6 @@ document.getElementById('matchForm').addEventListener('submit', async (e) => {
     const formData = new FormData(e.target);
     const winner = formData.get('winner');
     const loser = formData.get('loser');
-    const winnerScore = parseInt(formData.get('winnerScore'));
-    const loserScore = parseInt(formData.get('loserScore'));
 
     if (winner === loser) {
         showMessage('Winner and loser must be different players', 'error');
@@ -185,9 +198,7 @@ document.getElementById('matchForm').addEventListener('submit', async (e) => {
 
     await submitMatch({
         winner,
-        loser,
-        winnerScore,
-        loserScore
+        loser
     });
 
     e.target.reset();
@@ -224,5 +235,36 @@ document.getElementById('playerForm').addEventListener('submit', async (e) => {
         showMessage('Error adding player: ' + error.message, 'error');
     }
 });
+
+// Admin functions
+window.deletePlayer = async function(playerName) {
+    if (confirm(`Are you sure you want to delete ${playerName}? This cannot be undone.`)) {
+        try {
+            await database.ref(`players/${playerName}`).remove();
+            showMessage(`Player ${playerName} deleted`);
+        } catch (error) {
+            showMessage('Error deleting player: ' + error.message, 'error');
+        }
+    }
+};
+
+window.deleteMatch = async function(matchId) {
+    if (confirm('Are you sure you want to delete this match? This will NOT recalculate Elo ratings.')) {
+        try {
+            await database.ref(`matches/${matchId}`).remove();
+            showMessage('Match deleted');
+        } catch (error) {
+            showMessage('Error deleting match: ' + error.message, 'error');
+        }
+    }
+};
+
+// Show admin mode indicator if active
+if (isAdmin) {
+    document.addEventListener('DOMContentLoaded', () => {
+        const h1 = document.querySelector('h1');
+        h1.innerHTML += ' <span style="color: red; font-size: 0.5em;">(Admin Mode)</span>';
+    });
+}
 
 loadData();

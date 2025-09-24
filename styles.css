@@ -5,8 +5,8 @@
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    font-family: 'Comic Sans MS', 'Chalkboard SE', 'Marker Felt', cursive, sans-serif;
+    background: linear-gradient(135deg, #87a878 0%, #a8c09a 100%);
     min-height: 100vh;
     padding: 20px;
 }
@@ -92,7 +92,7 @@ select {
 }
 
 button {
-    background: #667eea;
+    background: #5d7c4f;
     color: white;
     padding: 12px 24px;
     border: none;
@@ -100,10 +100,11 @@ button {
     font-size: 16px;
     cursor: pointer;
     transition: background 0.3s;
+    font-family: inherit;
 }
 
 button:hover {
-    background: #5a67d8;
+    background: #4a6240;
 }
 
 button:disabled {
@@ -157,7 +158,7 @@ button:disabled {
 
 .match-score {
     font-weight: 600;
-    color: #667eea;
+    color: #5d7c4f;
 }
 
 .match-date {
@@ -182,4 +183,19 @@ button:disabled {
     .rankings td {
         padding: 8px;
     }
+}
+
+.delete-btn {
+    background: #dc3545;
+    color: white;
+    padding: 5px 10px;
+    border: none;
+    border-radius: 3px;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+.delete-btn:hover {
+    background: #c82333;
 }
