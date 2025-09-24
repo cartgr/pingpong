@@ -1,20 +1,114 @@
-const K_FACTOR = 32;
-const INITIAL_ELO = 1200;
+// Glicko-2 constants
+const INITIAL_RATING = 1500;
+const INITIAL_RD = 350;
+const INITIAL_VOLATILITY = 0.06;
+const TAU = 0.5; // System constant
+const EPSILON = 0.000001;
 
 // Check if admin mode is enabled
 const urlParams = new URLSearchParams(window.location.search);
 const isAdmin = urlParams.get('admin') === 'true';
 
-function calculateElo(winnerElo, loserElo) {
-    const expectedWinner = 1 / (1 + Math.pow(10, (loserElo - winnerElo) / 400));
-    const expectedLoser = 1 / (1 + Math.pow(10, (winnerElo - loserElo) / 400));
+// Glicko-2 calculation functions
+function g(phi) {
+    return 1 / Math.sqrt(1 + 3 * phi * phi / (Math.PI * Math.PI));
+}
 
-    const newWinnerElo = winnerElo + K_FACTOR * (1 - expectedWinner);
-    const newLoserElo = loserElo + K_FACTOR * (0 - expectedLoser);
+function E(mu, muJ, phiJ) {
+    return 1 / (1 + Math.exp(-g(phiJ) * (mu - muJ)));
+}
 
+function calculateGlicko2(player1, player2, score1) {
+    // Convert from Glicko-2 scale to internal scale
+    const mu1 = (player1.rating - 1500) / 173.7178;
+    const mu2 = (player2.rating - 1500) / 173.7178;
+    const phi1 = player1.rd / 173.7178;
+    const phi2 = player2.rd / 173.7178;
+    const sigma1 = player1.volatility;
+    const sigma2 = player2.volatility;
+
+    // Step 3: Compute variance
+    const gPhi2 = g(phi2);
+    const gPhi1 = g(phi1);
+    const E1 = E(mu1, mu2, phi2);
+    const E2 = E(mu2, mu1, phi1);
+
+    const v1 = 1 / (gPhi2 * gPhi2 * E1 * (1 - E1));
+    const v2 = 1 / (gPhi1 * gPhi1 * E2 * (1 - E2));
+
+    // Step 4: Compute delta
+    const delta1 = v1 * gPhi2 * (score1 - E1);
+    const delta2 = v2 * gPhi1 * ((1 - score1) - E2);
+
+    // Step 5: Calculate new volatility using Illinois algorithm
+    function calculateNewVolatility(sigma, phi, v, delta) {
+        const a = Math.log(sigma * sigma);
+        const phiSq = phi * phi;
+        const deltaSq = delta * delta;
+
+        const f = function(x) {
+            const ex = Math.exp(x);
+            const num = ex * (deltaSq - phiSq - v - ex);
+            const denom = 2 * Math.pow(phiSq + v + ex, 2);
+            return num / denom - (x - a) / (TAU * TAU);
+        };
+
+        let A = a;
+        let B;
+        if (deltaSq > phiSq + v) {
+            B = Math.log(deltaSq - phiSq - v);
+        } else {
+            let k = 1;
+            while (f(a - k * TAU) < 0) k++;
+            B = a - k * TAU;
+        }
+
+        let fA = f(A);
+        let fB = f(B);
+
+        while (Math.abs(B - A) > EPSILON) {
+            const C = A + (A - B) * fA / (fB - fA);
+            const fC = f(C);
+
+            if (fC * fB < 0) {
+                A = B;
+                fA = fB;
+            } else {
+                fA = fA / 2;
+            }
+
+            B = C;
+            fB = fC;
+        }
+
+        return Math.exp(A / 2);
+    }
+
+    const newSigma1 = calculateNewVolatility(sigma1, phi1, v1, delta1);
+    const newSigma2 = calculateNewVolatility(sigma2, phi2, v2, delta2);
+
+    // Step 6: Update rating deviation
+    const phiStar1 = Math.sqrt(phi1 * phi1 + newSigma1 * newSigma1);
+    const phiStar2 = Math.sqrt(phi2 * phi2 + newSigma2 * newSigma2);
+
+    // Step 7: Update rating and RD
+    const newPhi1 = 1 / Math.sqrt(1 / (phiStar1 * phiStar1) + 1 / v1);
+    const newPhi2 = 1 / Math.sqrt(1 / (phiStar2 * phiStar2) + 1 / v2);
+    const newMu1 = mu1 + newPhi1 * newPhi1 * gPhi2 * (score1 - E1);
+    const newMu2 = mu2 + newPhi2 * newPhi2 * gPhi1 * ((1 - score1) - E2);
+
+    // Step 8: Convert back to Glicko-2 scale
     return {
-        winner: Math.round(newWinnerElo),
-        loser: Math.round(newLoserElo)
+        player1: {
+            rating: Math.round(173.7178 * newMu1 + 1500),
+            rd: Math.round(173.7178 * newPhi1),
+            volatility: newSigma1
+        },
+        player2: {
+            rating: Math.round(173.7178 * newMu2 + 1500),
+            rd: Math.round(173.7178 * newPhi2),
+            volatility: newSigma2
+        }
     };
 }
 
@@ -44,7 +138,7 @@ function updateRankings(players) {
     }
 
     const sortedPlayers = Object.entries(players)
-        .sort((a, b) => b[1].elo - a[1].elo);
+        .sort((a, b) => (b[1].rating || b[1].elo || INITIAL_RATING) - (a[1].rating || a[1].elo || INITIAL_RATING));
 
     let html = `
         <table>
@@ -52,7 +146,21 @@ function updateRankings(players) {
                 <tr>
                     <th>Rank</th>
                     <th>Player</th>
-                    <th>Elo</th>
+                    <th title="Glicko-2 Rating - Click for more info" style="cursor: help;">
+                        <a href="https://en.wikipedia.org/wiki/Glicko_rating_system" target="_blank" style="color: inherit; text-decoration: none;">
+                            Rating ⓘ
+                        </a>
+                    </th>
+                    <th title="Rating Deviation - Uncertainty of rating (lower = more certain)" style="cursor: help;">
+                        <a href="https://en.wikipedia.org/wiki/Glicko_rating_system#Rating_deviation" target="_blank" style="color: inherit; text-decoration: none;">
+                            RD ⓘ
+                        </a>
+                    </th>
+                    <th title="Volatility - How erratic performance is (lower = more consistent)" style="cursor: help;">
+                        <a href="https://en.wikipedia.org/wiki/Glicko_rating_system#Glicko-2_algorithm" target="_blank" style="color: inherit; text-decoration: none;">
+                            Vol ⓘ
+                        </a>
+                    </th>
                     <th>Win Rate</th>
                     ${isAdmin ? '<th>Action</th>' : ''}
                 </tr>
@@ -65,13 +173,19 @@ function updateRankings(players) {
         const rankClass = rank <= 3 ? `rank-${rank}` : '';
         const winRate = player.matches > 0 ? ((player.wins / player.matches) * 100).toFixed(1) : '0.0';
 
+        const rating = player.rating || player.elo || INITIAL_RATING;
+        const rd = player.rd || INITIAL_RD;
+        const volatility = player.volatility || INITIAL_VOLATILITY;
+
         const deleteButton = isAdmin ? `<td><button class="delete-btn" onclick="deletePlayer('${name}')">Delete</button></td>` : '';
 
         html += `
             <tr>
                 <td class="${rankClass}">${rank}</td>
                 <td>${name}</td>
-                <td>${player.elo}</td>
+                <td>${rating}</td>
+                <td>${rd}</td>
+                <td>${volatility.toFixed(4)}</td>
                 <td>${winRate}%</td>
                 ${deleteButton}
             </tr>
@@ -115,10 +229,22 @@ function updateRecentMatches(matches) {
     sortedMatches.forEach(match => {
         const date = new Date(match.timestamp).toLocaleDateString();
         const deleteButton = isAdmin ? `<button class="delete-btn" onclick="deleteMatch('${match.id}')">Delete</button>` : '';
+
+        // Support both old Elo and new Glicko-2 rating changes
+        const winnerChange = (match.winnerRatingChange !== undefined) ?
+            `<span style="color: #28a745; font-weight: bold;">(+${match.winnerRatingChange})</span>` :
+            (match.winnerEloChange ?
+                `<span style="color: #28a745; font-weight: bold;">(+${match.winnerEloChange})</span>` : '');
+
+        const loserChange = (match.loserRatingChange !== undefined) ?
+            `<span style="color: #dc3545; font-weight: bold;">(${match.loserRatingChange})</span>` :
+            (match.loserEloChange ?
+                `<span style="color: #dc3545; font-weight: bold;">(${match.loserEloChange})</span>` : '');
+
         html += `
             <div class="match-item">
                 <div>
-                    <strong>${match.winner}</strong> defeated <strong>${match.loser}</strong>
+                    <strong>${match.winner}</strong> ${winnerChange} defeated <strong>${match.loser}</strong> ${loserChange}
                 </div>
                 <div style="display: flex; gap: 10px; align-items: center;">
                     <span class="match-date">${date}</span>
@@ -155,22 +281,53 @@ async function submitMatch(matchData) {
             return;
         }
 
-        const newElos = calculateElo(winner.elo, loser.elo);
+        // Ensure players have Glicko-2 ratings
+        if (!winner.rating) {
+            winner = {
+                ...winner,
+                rating: winner.elo || INITIAL_RATING,
+                rd: INITIAL_RD,
+                volatility: INITIAL_VOLATILITY
+            };
+        }
+        if (!loser.rating) {
+            loser = {
+                ...loser,
+                rating: loser.elo || INITIAL_RATING,
+                rd: INITIAL_RD,
+                volatility: INITIAL_VOLATILITY
+            };
+        }
+
+        const oldWinnerRating = winner.rating;
+        const oldLoserRating = loser.rating;
+
+        // Calculate new Glicko-2 ratings
+        const newRatings = calculateGlicko2(winner, loser, 1); // Winner scored 1, loser scored 0
+
+        const winnerChange = newRatings.player1.rating - oldWinnerRating;
+        const loserChange = newRatings.player2.rating - oldLoserRating;
 
         await database.ref(`players/${matchData.winner}`).update({
-            elo: newElos.winner,
+            rating: newRatings.player1.rating,
+            rd: newRatings.player1.rd,
+            volatility: newRatings.player1.volatility,
             matches: (winner.matches || 0) + 1,
             wins: (winner.wins || 0) + 1
         });
 
         await database.ref(`players/${matchData.loser}`).update({
-            elo: newElos.loser,
+            rating: newRatings.player2.rating,
+            rd: newRatings.player2.rd,
+            volatility: newRatings.player2.volatility,
             matches: (loser.matches || 0) + 1,
             wins: loser.wins || 0
         });
 
         await database.ref('matches').push({
             ...matchData,
+            winnerRatingChange: winnerChange,
+            loserRatingChange: loserChange,
             timestamp: new Date().toISOString()
         });
 
@@ -220,7 +377,9 @@ document.getElementById('playerForm').addEventListener('submit', async (e) => {
         }
 
         await database.ref(`players/${playerName}`).set({
-            elo: INITIAL_ELO,
+            rating: INITIAL_RATING,
+            rd: INITIAL_RD,
+            volatility: INITIAL_VOLATILITY,
             matches: 0,
             wins: 0
         });
