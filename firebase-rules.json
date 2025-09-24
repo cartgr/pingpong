@@ -1,0 +1,19 @@
+{
+  "rules": {
+    "players": {
+      ".read": true,
+      ".write": true,
+      "$player": {
+        ".validate": "newData.hasChildren(['elo', 'matches', 'wins'])"
+      }
+    },
+    "matches": {
+      ".read": true,
+      ".write": true,
+      ".indexOn": ["timestamp"],
+      "$match": {
+        ".validate": "newData.hasChildren(['winner', 'loser', 'winnerScore', 'loserScore', 'timestamp'])"
+      }
+    }
+  }
+}
