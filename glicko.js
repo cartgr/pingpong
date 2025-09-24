@@ -146,20 +146,17 @@ function updateRankings(players) {
                 <tr>
                     <th>Rank</th>
                     <th>Player</th>
-                    <th title="Glicko-2 Rating - Click for more info" style="cursor: help;">
-                        <a href="https://en.wikipedia.org/wiki/Glicko_rating_system" target="_blank" style="color: inherit; text-decoration: none;">
-                            Rating ⓘ
-                        </a>
+                    <th>
+                        Rating
+                        <span class="info-icon" onclick="showInfo('rating')">ⓘ</span>
                     </th>
-                    <th title="Rating Deviation - Uncertainty of rating (lower = more certain)" style="cursor: help;">
-                        <a href="https://en.wikipedia.org/wiki/Glicko_rating_system#Rating_deviation" target="_blank" style="color: inherit; text-decoration: none;">
-                            RD ⓘ
-                        </a>
+                    <th>
+                        RD
+                        <span class="info-icon" onclick="showInfo('rd')">ⓘ</span>
                     </th>
-                    <th title="Volatility - How erratic performance is (lower = more consistent)" style="cursor: help;">
-                        <a href="https://en.wikipedia.org/wiki/Glicko_rating_system#Glicko-2_algorithm" target="_blank" style="color: inherit; text-decoration: none;">
-                            Vol ⓘ
-                        </a>
+                    <th>
+                        Vol
+                        <span class="info-icon" onclick="showInfo('vol')">ⓘ</span>
                     </th>
                     <th>Win Rate</th>
                     ${isAdmin ? '<th>Action</th>' : ''}
@@ -412,6 +409,33 @@ window.deleteMatch = async function(matchId) {
             showMessage('Error deleting match: ' + error.message, 'error');
         }
     }
+};
+
+// Info popup function
+window.showInfo = function(type) {
+    let message = '';
+    switch(type) {
+        case 'rating':
+            message = 'Glicko-2 rating: Your skill level (1500 = average). Higher is better! <a href="https://en.wikipedia.org/wiki/Glicko_rating_system" target="_blank" style="color: #5d7c4f;">Learn more →</a>';
+            break;
+        case 'rd':
+            message = 'Rating Deviation: How uncertain your rating is (0-350). Lower = more accurate rating.';
+            break;
+        case 'vol':
+            message = 'Volatility: How consistent you are (0.06 = normal). Lower = more predictable performance.';
+            break;
+    }
+
+    // Create popup
+    const popup = document.createElement('div');
+    popup.className = 'info-popup';
+    popup.innerHTML = `
+        <div class="info-content">
+            ${message}
+            <button onclick="this.parentElement.parentElement.remove()">Got it</button>
+        </div>
+    `;
+    document.body.appendChild(popup);
 };
 
 // Show admin mode indicator if active
