@@ -404,7 +404,7 @@ window.deletePlayer = async function(playerName) {
 };
 
 window.deleteMatch = async function(matchId) {
-    if (confirm('Are you sure you want to delete this match? This will NOT recalculate Elo ratings.')) {
+    if (confirm('Are you sure you want to delete this match? This will NOT recalculate Glicko-2 ratings.')) {
         try {
             await database.ref(`matches/${matchId}`).remove();
             showMessage('Match deleted');
