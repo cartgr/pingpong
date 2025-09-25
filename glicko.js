@@ -46,6 +46,8 @@ function calculateGlicko2(player1, player2, score1) {
         const phiSq = phi * phi;
         const deltaSq = delta * delta;
 
+        console.log('Volatility calculation inputs:', { sigma, phi, v, delta, deltaSq, phiSq });
+
         const f = function(x) {
             const ex = Math.exp(x);
             const num = ex * (deltaSq - phiSq - v - ex);
@@ -66,24 +68,35 @@ function calculateGlicko2(player1, player2, score1) {
         let fA = f(A);
         let fB = f(B);
 
+        console.log('Initial interval:', { A, B, fA, fB });
+
         // Illinois algorithm for finding root
-        while (Math.abs(B - A) > EPSILON) {
+        let iterations = 0;
+        while (Math.abs(B - A) > EPSILON && iterations < 100) {
+            iterations++;
             const C = A + (A - B) * fA / (fB - fA);
             const fC = f(C);
 
-            if (fC * fB <= 0) {
+            if (fC * fB < 0) {
                 A = B;
                 fA = fB;
-                B = C;
-                fB = fC;
             } else {
                 fA = fA / 2;
-                B = C;
-                fB = fC;
             }
+
+            B = C;
+            fB = fC;
         }
 
-        return Math.exp(A / 2);
+        const newSigma = Math.exp(A / 2);
+        console.log('Iterations:', iterations, 'Old sigma:', sigma, 'New sigma:', newSigma);
+        console.log('Final A:', A, 'Final B:', B, 'Difference:', Math.abs(B - A));
+
+        // Verify the solution
+        const finalF = f(Math.log(newSigma * newSigma));
+        console.log('Verification - f(solution):', finalF, 'Should be close to 0');
+
+        return newSigma;
     }
 
     const newSigma1 = calculateNewVolatility(sigma1, phi1, v1, delta1);
@@ -100,7 +113,7 @@ function calculateGlicko2(player1, player2, score1) {
     const newMu2 = mu2 + newPhi2 * newPhi2 * gPhi1 * ((1 - score1) - E2);
 
     // Step 8: Convert back to Glicko-2 scale
-    return {
+    const result = {
         player1: {
             rating: Math.round(173.7178 * newMu1 + 1500),
             rd: Math.round(173.7178 * newPhi1),
@@ -112,6 +125,9 @@ function calculateGlicko2(player1, player2, score1) {
             volatility: newSigma2
         }
     };
+
+    console.log('Final Glicko-2 results:', result);
+    return result;
 }
 
 function loadData() {
@@ -174,7 +190,12 @@ function updateRankings(players) {
 
         const rating = player.rating || player.elo || INITIAL_RATING;
         const rd = player.rd || INITIAL_RD;
-        const volatility = player.volatility || INITIAL_VOLATILITY;
+        const volatility = player.volatility !== undefined ? player.volatility : INITIAL_VOLATILITY;
+
+        // Debug: log if volatility is missing
+        if (player.volatility === undefined) {
+            console.log(`Player ${name} has no volatility stored, using default ${INITIAL_VOLATILITY}`);
+        }
 
         const deleteButton = isAdmin ? `<td><button class="delete-btn" onclick="deletePlayer('${name}')">Delete</button></td>` : '';
 
@@ -184,7 +205,7 @@ function updateRankings(players) {
                 <td>${name}</td>
                 <td>${rating}</td>
                 <td>${rd}</td>
-                <td>${volatility.toFixed(4)}</td>
+                <td>${volatility.toFixed(6)}</td>
                 <td>${winRate}%</td>
                 ${deleteButton}
             </tr>
@@ -306,6 +327,15 @@ async function submitMatch(matchData) {
 
         const winnerChange = newRatings.player1.rating - oldWinnerRating;
         const loserChange = newRatings.player2.rating - oldLoserRating;
+
+        console.log('Saving winner:', matchData.winner, {
+            oldVolatility: winner.volatility,
+            newVolatility: newRatings.player1.volatility
+        });
+        console.log('Saving loser:', matchData.loser, {
+            oldVolatility: loser.volatility,
+            newVolatility: newRatings.player2.volatility
+        });
 
         await database.ref(`players/${matchData.winner}`).update({
             rating: newRatings.player1.rating,
