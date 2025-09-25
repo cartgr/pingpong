@@ -24,8 +24,7 @@ function calculateGlicko2(player1, player2, score1) {
     const mu2 = (player2.rating - 1500) / 173.7178;
     const phi1 = player1.rd / 173.7178;
     const phi2 = player2.rd / 173.7178;
-    const sigma1 = player1.volatility;
-    const sigma2 = player2.volatility;
+    const sigma = INITIAL_VOLATILITY; // Use fixed volatility
 
     // Step 3: Compute variance
     const gPhi2 = g(phi2);
@@ -40,71 +39,9 @@ function calculateGlicko2(player1, player2, score1) {
     const delta1 = v1 * gPhi2 * (score1 - E1);
     const delta2 = v2 * gPhi1 * ((1 - score1) - E2);
 
-    // Step 5: Calculate new volatility using Illinois algorithm
-    function calculateNewVolatility(sigma, phi, v, delta) {
-        const a = Math.log(sigma * sigma);
-        const phiSq = phi * phi;
-        const deltaSq = delta * delta;
-
-        console.log('Volatility calculation inputs:', { sigma, phi, v, delta, deltaSq, phiSq });
-
-        const f = function(x) {
-            const ex = Math.exp(x);
-            const num = ex * (deltaSq - phiSq - v - ex);
-            const denom = 2 * Math.pow(phiSq + v + ex, 2);
-            return num / denom - (x - a) / (TAU * TAU);
-        };
-
-        let A = a;
-        let B;
-        if (deltaSq > phiSq + v) {
-            B = Math.log(deltaSq - phiSq - v);
-        } else {
-            let k = 1;
-            while (f(a - k * TAU) < 0) k++;
-            B = a - k * TAU;
-        }
-
-        let fA = f(A);
-        let fB = f(B);
-
-        console.log('Initial interval:', { A, B, fA, fB });
-
-        // Illinois algorithm for finding root
-        let iterations = 0;
-        while (Math.abs(B - A) > EPSILON && iterations < 100) {
-            iterations++;
-            const C = A + (A - B) * fA / (fB - fA);
-            const fC = f(C);
-
-            if (fC * fB < 0) {
-                A = B;
-                fA = fB;
-            } else {
-                fA = fA / 2;
-            }
-
-            B = C;
-            fB = fC;
-        }
-
-        const newSigma = Math.exp(A / 2);
-        console.log('Iterations:', iterations, 'Old sigma:', sigma, 'New sigma:', newSigma);
-        console.log('Final A:', A, 'Final B:', B, 'Difference:', Math.abs(B - A));
-
-        // Verify the solution
-        const finalF = f(Math.log(newSigma * newSigma));
-        console.log('Verification - f(solution):', finalF, 'Should be close to 0');
-
-        return newSigma;
-    }
-
-    const newSigma1 = calculateNewVolatility(sigma1, phi1, v1, delta1);
-    const newSigma2 = calculateNewVolatility(sigma2, phi2, v2, delta2);
-
-    // Step 6: Update rating deviation
-    const phiStar1 = Math.sqrt(phi1 * phi1 + newSigma1 * newSigma1);
-    const phiStar2 = Math.sqrt(phi2 * phi2 + newSigma2 * newSigma2);
+    // Step 6: Update rating deviation (skip volatility calculation)
+    const phiStar1 = Math.sqrt(phi1 * phi1 + sigma * sigma);
+    const phiStar2 = Math.sqrt(phi2 * phi2 + sigma * sigma);
 
     // Step 7: Update rating and RD
     const newPhi1 = 1 / Math.sqrt(1 / (phiStar1 * phiStar1) + 1 / v1);
@@ -113,21 +50,16 @@ function calculateGlicko2(player1, player2, score1) {
     const newMu2 = mu2 + newPhi2 * newPhi2 * gPhi1 * ((1 - score1) - E2);
 
     // Step 8: Convert back to Glicko-2 scale
-    const result = {
+    return {
         player1: {
             rating: Math.round(173.7178 * newMu1 + 1500),
-            rd: Math.round(173.7178 * newPhi1),
-            volatility: newSigma1
+            rd: Math.round(173.7178 * newPhi1)
         },
         player2: {
             rating: Math.round(173.7178 * newMu2 + 1500),
-            rd: Math.round(173.7178 * newPhi2),
-            volatility: newSigma2
+            rd: Math.round(173.7178 * newPhi2)
         }
     };
-
-    console.log('Final Glicko-2 results:', result);
-    return result;
 }
 
 function loadData() {
@@ -172,10 +104,6 @@ function updateRankings(players) {
                         RD
                         <span class="info-icon" onclick="showInfo('rd')">ⓘ</span>
                     </th>
-                    <th>
-                        Vol
-                        <span class="info-icon" onclick="showInfo('vol')">ⓘ</span>
-                    </th>
                     <th>Win Rate</th>
                     ${isAdmin ? '<th>Action</th>' : ''}
                 </tr>
@@ -190,12 +118,6 @@ function updateRankings(players) {
 
         const rating = player.rating || player.elo || INITIAL_RATING;
         const rd = player.rd || INITIAL_RD;
-        const volatility = player.volatility !== undefined ? player.volatility : INITIAL_VOLATILITY;
-
-        // Debug: log if volatility is missing
-        if (player.volatility === undefined) {
-            console.log(`Player ${name} has no volatility stored, using default ${INITIAL_VOLATILITY}`);
-        }
 
         const deleteButton = isAdmin ? `<td><button class="delete-btn" onclick="deletePlayer('${name}')">Delete</button></td>` : '';
 
@@ -205,7 +127,6 @@ function updateRankings(players) {
                 <td>${name}</td>
                 <td>${rating}</td>
                 <td>${rd}</td>
-                <td>${volatility.toFixed(6)}</td>
                 <td>${winRate}%</td>
                 ${deleteButton}
             </tr>
@@ -306,16 +227,14 @@ async function submitMatch(matchData) {
             winner = {
                 ...winner,
                 rating: winner.elo || INITIAL_RATING,
-                rd: INITIAL_RD,
-                volatility: INITIAL_VOLATILITY
+                rd: INITIAL_RD
             };
         }
         if (!loser.rating) {
             loser = {
                 ...loser,
                 rating: loser.elo || INITIAL_RATING,
-                rd: INITIAL_RD,
-                volatility: INITIAL_VOLATILITY
+                rd: INITIAL_RD
             };
         }
 
@@ -328,19 +247,9 @@ async function submitMatch(matchData) {
         const winnerChange = newRatings.player1.rating - oldWinnerRating;
         const loserChange = newRatings.player2.rating - oldLoserRating;
 
-        console.log('Saving winner:', matchData.winner, {
-            oldVolatility: winner.volatility,
-            newVolatility: newRatings.player1.volatility
-        });
-        console.log('Saving loser:', matchData.loser, {
-            oldVolatility: loser.volatility,
-            newVolatility: newRatings.player2.volatility
-        });
-
         await database.ref(`players/${matchData.winner}`).update({
             rating: newRatings.player1.rating,
             rd: newRatings.player1.rd,
-            volatility: newRatings.player1.volatility,
             matches: (winner.matches || 0) + 1,
             wins: (winner.wins || 0) + 1
         });
@@ -348,7 +257,6 @@ async function submitMatch(matchData) {
         await database.ref(`players/${matchData.loser}`).update({
             rating: newRatings.player2.rating,
             rd: newRatings.player2.rd,
-            volatility: newRatings.player2.volatility,
             matches: (loser.matches || 0) + 1,
             wins: loser.wins || 0
         });
@@ -408,7 +316,6 @@ document.getElementById('playerForm').addEventListener('submit', async (e) => {
         await database.ref(`players/${playerName}`).set({
             rating: INITIAL_RATING,
             rd: INITIAL_RD,
-            volatility: INITIAL_VOLATILITY,
             matches: 0,
             wins: 0
         });
@@ -436,7 +343,6 @@ async function recalculateAllRatings() {
             resetPlayers[name] = {
                 rating: INITIAL_RATING,
                 rd: INITIAL_RD,
-                volatility: INITIAL_VOLATILITY,
                 matches: 0,
                 wins: 0
             };
@@ -536,9 +442,6 @@ window.showInfo = function(type) {
             break;
         case 'rd':
             message = 'Rating Deviation: How uncertain your rating is (0-350). Lower = more accurate rating.';
-            break;
-        case 'vol':
-            message = 'Volatility: How consistent you are (0.06 = normal). Lower = more predictable performance.';
             break;
     }
 
