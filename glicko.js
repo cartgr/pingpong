@@ -66,19 +66,21 @@ function calculateGlicko2(player1, player2, score1) {
         let fA = f(A);
         let fB = f(B);
 
+        // Illinois algorithm for finding root
         while (Math.abs(B - A) > EPSILON) {
             const C = A + (A - B) * fA / (fB - fA);
             const fC = f(C);
 
-            if (fC * fB < 0) {
+            if (fC * fB <= 0) {
                 A = B;
                 fA = fB;
+                B = C;
+                fB = fC;
             } else {
                 fA = fA / 2;
+                B = C;
+                fB = fC;
             }
-
-            B = C;
-            fB = fC;
         }
 
         return Math.exp(A / 2);
@@ -388,6 +390,82 @@ document.getElementById('playerForm').addEventListener('submit', async (e) => {
     }
 });
 
+// Function to recalculate all ratings from match history
+async function recalculateAllRatings() {
+    try {
+        // Get all matches and players
+        const matchesSnapshot = await database.ref('matches').once('value');
+        const playersSnapshot = await database.ref('players').once('value');
+
+        const matches = matchesSnapshot.val() || {};
+        const players = playersSnapshot.val() || {};
+
+        // Reset all players to initial values
+        const resetPlayers = {};
+        Object.keys(players).forEach(name => {
+            resetPlayers[name] = {
+                rating: INITIAL_RATING,
+                rd: INITIAL_RD,
+                volatility: INITIAL_VOLATILITY,
+                matches: 0,
+                wins: 0
+            };
+        });
+
+        // Sort matches by timestamp
+        const sortedMatches = Object.entries(matches)
+            .map(([id, match]) => ({ ...match, id }))
+            .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+        // Replay all matches in chronological order
+        for (const match of sortedMatches) {
+            const winner = resetPlayers[match.winner];
+            const loser = resetPlayers[match.loser];
+
+            if (!winner || !loser) continue; // Skip if player doesn't exist
+
+            // Calculate new ratings
+            const newRatings = calculateGlicko2(winner, loser, 1);
+
+            // Update winner
+            resetPlayers[match.winner] = {
+                ...newRatings.player1,
+                matches: winner.matches + 1,
+                wins: winner.wins + 1
+            };
+
+            // Update loser
+            resetPlayers[match.loser] = {
+                ...newRatings.player2,
+                matches: loser.matches + 1,
+                wins: loser.wins
+            };
+
+            // Update the match with new rating changes
+            const winnerChange = newRatings.player1.rating - winner.rating;
+            const loserChange = newRatings.player2.rating - loser.rating;
+
+            await database.ref(`matches/${match.id}`).update({
+                winnerRatingChange: winnerChange,
+                loserRatingChange: loserChange
+            });
+        }
+
+        // Update all players in database
+        const updates = {};
+        Object.entries(resetPlayers).forEach(([name, player]) => {
+            updates[`players/${name}`] = player;
+        });
+
+        await database.ref().update(updates);
+
+        return true;
+    } catch (error) {
+        console.error('Error recalculating ratings:', error);
+        throw error;
+    }
+}
+
 // Admin functions
 window.deletePlayer = async function(playerName) {
     if (confirm(`Are you sure you want to delete ${playerName}? This cannot be undone.`)) {
@@ -401,12 +479,20 @@ window.deletePlayer = async function(playerName) {
 };
 
 window.deleteMatch = async function(matchId) {
-    if (confirm('Are you sure you want to delete this match? This will NOT recalculate Glicko-2 ratings.')) {
+    if (confirm('Are you sure you want to delete this match? Ratings will be recalculated from match history.')) {
         try {
+            // Delete the match first
             await database.ref(`matches/${matchId}`).remove();
-            showMessage('Match deleted');
+
+            // Show immediate feedback
+            showMessage('Match deleted, recalculating ratings...');
+
+            // Recalculate all ratings
+            await recalculateAllRatings();
+
+            showMessage('Match deleted and ratings recalculated successfully!');
         } catch (error) {
-            showMessage('Error deleting match: ' + error.message, 'error');
+            showMessage('Error: ' + error.message, 'error');
         }
     }
 };
