@@ -53,7 +53,20 @@
         </div>
 
         <div class="section">
-            <h2>Recent Matches</h2>
+            <h2>Match History</h2>
+            <div class="recent-matches-controls">
+                <div class="control-group">
+                    <label for="recentMatchLimit">Show</label>
+                    <select id="recentMatchLimit" name="recentMatchLimit">
+                        <option value="5">Last 5</option>
+                        <option value="10" selected>Last 10</option>
+                        <option value="15">Last 15</option>
+                        <option value="20">Last 20</option>
+                        <option value="50">Last 50</option>
+                        <option value="100">Last 100</option>
+                    </select>
+                </div>
+            </div>
             <div id="recentMatches" class="recent-matches">
                 <div class="loading">Loading matches...</div>
             </div>

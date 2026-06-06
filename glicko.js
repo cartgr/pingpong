@@ -4,10 +4,18 @@ const INITIAL_RD = 350;
 const INITIAL_VOLATILITY = 0.06;
 const TAU = 0.5; // System constant
 const EPSILON = 0.000001;
+const DEFAULT_RECENT_MATCH_LIMIT = 10;
+const DEFAULT_RECENT_MATCH_SORT_FIELD = 'date';
+const DEFAULT_RECENT_MATCH_SORT_DIRECTION = 'desc';
 
 // Check if admin mode is enabled
 const urlParams = new URLSearchParams(window.location.search);
 const isAdmin = urlParams.get('admin') === 'true';
+let allMatches = [];
+const recentMatchSortState = {
+    field: DEFAULT_RECENT_MATCH_SORT_FIELD,
+    direction: DEFAULT_RECENT_MATCH_SORT_DIRECTION
+};
 
 // Glicko-2 calculation functions
 function g(phi) {
@@ -63,20 +71,119 @@ function calculateGlicko2(player1, player2, score1) {
 }
 
 function loadData() {
+    setupRecentMatchControls();
+
     database.ref('players').on('value', (snapshot) => {
         const players = snapshot.val() || {};
         updateRankings(players);
         updatePlayerSelects(players);
     });
 
-    database.ref('matches').limitToLast(10).on('value', (snapshot) => {
-        const matches = snapshot.val() || {};
-        const matchesWithIds = Object.entries(matches).map(([id, match]) => ({
+    subscribeToMatches();
+}
+
+function subscribeToMatches() {
+    database.ref('matches').orderByChild('timestamp').on('value', (snapshot) => {
+        const matches = [];
+
+        snapshot.forEach((childSnapshot) => {
+            matches.push({
+                ...childSnapshot.val(),
+                id: childSnapshot.key
+            });
+        });
+
+        allMatches = matches.map((match, index) => ({
             ...match,
-            id
+            matchNumber: index + 1
         }));
-        updateRecentMatches(matchesWithIds);
+
+        updateRecentMatches(allMatches);
     });
+}
+
+function setupRecentMatchControls() {
+    const limitSelect = document.getElementById('recentMatchLimit');
+
+    if (!limitSelect) {
+        return;
+    }
+
+    limitSelect.value = String(DEFAULT_RECENT_MATCH_LIMIT);
+
+    limitSelect.addEventListener('change', () => {
+        updateRecentMatches(allMatches);
+    });
+}
+
+function getRecentMatchLimit() {
+    const limitSelect = document.getElementById('recentMatchLimit');
+    return Number(limitSelect?.value || DEFAULT_RECENT_MATCH_LIMIT);
+}
+
+function sortRecentMatches(matches) {
+    const directionFactor = recentMatchSortState.direction === 'asc' ? 1 : -1;
+
+    return [...matches].sort((a, b) => {
+        const dateComparison = new Date(b.timestamp) - new Date(a.timestamp);
+
+        switch (recentMatchSortState.field) {
+            case 'id': {
+                const comparison = a.matchNumber - b.matchNumber;
+                if (comparison !== 0) {
+                    return comparison * directionFactor;
+                }
+                break;
+            }
+            case 'winner': {
+                const comparison = a.winner.localeCompare(b.winner, undefined, { sensitivity: 'base' });
+                if (comparison !== 0) {
+                    return comparison * directionFactor;
+                }
+                if (dateComparison !== 0) {
+                    return dateComparison;
+                }
+                break;
+            }
+            case 'loser': {
+                const comparison = a.loser.localeCompare(b.loser, undefined, { sensitivity: 'base' });
+                if (comparison !== 0) {
+                    return comparison * directionFactor;
+                }
+                if (dateComparison !== 0) {
+                    return dateComparison;
+                }
+                break;
+            }
+            case 'date':
+            default: {
+                const comparison = new Date(a.timestamp) - new Date(b.timestamp);
+                if (comparison !== 0) {
+                    return comparison * directionFactor;
+                }
+                break;
+            }
+        }
+
+        return a.matchNumber - b.matchNumber;
+    });
+}
+
+function getRecentMatchSortIndicator(field) {
+    if (recentMatchSortState.field !== field) {
+        return '-';
+    }
+
+    return recentMatchSortState.direction === 'asc' ? '^' : 'v';
+}
+
+function getRecentMatchHeaderButtonHtml(field, label) {
+    return `
+        <button type="button" class="sort-header-button" onclick="setRecentMatchSort('${field}')">
+            <span>${label}</span>
+            <span class="sort-indicator">${getRecentMatchSortIndicator(field)}</span>
+        </button>
+    `;
 }
 
 function updateRankings(players) {
@@ -104,6 +211,7 @@ function updateRankings(players) {
                         RD
                         <span class="info-icon" onclick="showInfo('rd')">ⓘ</span>
                     </th>
+                    <th>Games</th>
                     <th>Win Rate</th>
                     ${isAdmin ? '<th>Action</th>' : ''}
                 </tr>
@@ -114,7 +222,8 @@ function updateRankings(players) {
     sortedPlayers.forEach((([name, player], index) => {
         const rank = index + 1;
         const rankClass = rank <= 3 ? `rank-${rank}` : '';
-        const winRate = player.matches > 0 ? ((player.wins / player.matches) * 100).toFixed(1) : '0.0';
+        const totalGames = player.matches || 0;
+        const winRate = totalGames > 0 ? ((player.wins / totalGames) * 100).toFixed(1) : '0.0';
 
         const rating = player.rating || player.elo || INITIAL_RATING;
         const rd = player.rd || INITIAL_RD;
@@ -127,6 +236,7 @@ function updateRankings(players) {
                 <td>${name}</td>
                 <td>${rating}</td>
                 <td>${rd}</td>
+                <td>${totalGames}</td>
                 <td>${winRate}%</td>
                 ${deleteButton}
             </tr>
@@ -162,41 +272,65 @@ function updateRecentMatches(matches) {
         return;
     }
 
-    const sortedMatches = matches.sort((a, b) =>
-        new Date(b.timestamp) - new Date(a.timestamp)
-    );
+    const sortedMatches = sortRecentMatches(matches).slice(0, getRecentMatchLimit());
 
-    let html = '';
+    let html = `
+        <table class="recent-matches-table">
+            <thead>
+                <tr>
+                    <th>${getRecentMatchHeaderButtonHtml('id', 'ID')}</th>
+                    <th>${getRecentMatchHeaderButtonHtml('winner', 'Winner')}</th>
+                    <th>${getRecentMatchHeaderButtonHtml('loser', 'Loser')}</th>
+                    <th>${getRecentMatchHeaderButtonHtml('date', 'Date')}</th>
+                    ${isAdmin ? '<th>Action</th>' : ''}
+                </tr>
+            </thead>
+            <tbody>
+    `;
+
     sortedMatches.forEach(match => {
         const date = new Date(match.timestamp).toLocaleDateString();
-        const deleteButton = isAdmin ? `<button class="delete-btn" onclick="deleteMatch('${match.id}')">Delete</button>` : '';
-
-        // Support both old Elo and new Glicko-2 rating changes
-        const winnerChange = (match.winnerRatingChange !== undefined) ?
-            `<span style="color: #28a745; font-weight: bold;">(+${match.winnerRatingChange})</span>` :
-            (match.winnerEloChange ?
-                `<span style="color: #28a745; font-weight: bold;">(+${match.winnerEloChange})</span>` : '');
-
-        const loserChange = (match.loserRatingChange !== undefined) ?
-            `<span style="color: #dc3545; font-weight: bold;">(${match.loserRatingChange})</span>` :
-            (match.loserEloChange ?
-                `<span style="color: #dc3545; font-weight: bold;">(${match.loserEloChange})</span>` : '');
+        const deleteButton = isAdmin ? `<td><button class="delete-btn" onclick="deleteMatch('${match.id}')">Delete</button></td>` : '';
+        const winnerChange = match.winnerRatingChange !== undefined
+            ? `<span class="match-change match-change-win">(+${match.winnerRatingChange})</span>`
+            : (match.winnerEloChange
+                ? `<span class="match-change match-change-win">(+${match.winnerEloChange})</span>`
+                : '');
+        const loserChange = match.loserRatingChange !== undefined
+            ? `<span class="match-change match-change-loss">(${match.loserRatingChange})</span>`
+            : (match.loserEloChange
+                ? `<span class="match-change match-change-loss">(${match.loserEloChange})</span>`
+                : '');
 
         html += `
-            <div class="match-item">
-                <div>
-                    <strong>${match.winner}</strong> ${winnerChange} defeated <strong>${match.loser}</strong> ${loserChange}
-                </div>
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <span class="match-date">${date}</span>
-                    ${deleteButton}
-                </div>
-            </div>
+            <tr>
+                <td>${match.matchNumber}</td>
+                <td>${match.winner} ${winnerChange}</td>
+                <td>${match.loser} ${loserChange}</td>
+                <td class="recent-match-date">${date}</td>
+                ${deleteButton}
+            </tr>
         `;
     });
 
+    html += `
+            </tbody>
+        </table>
+    `;
+
     matchesDiv.innerHTML = html;
 }
+
+window.setRecentMatchSort = function(field) {
+    if (recentMatchSortState.field === field) {
+        recentMatchSortState.direction = recentMatchSortState.direction === 'asc' ? 'desc' : 'asc';
+    } else {
+        recentMatchSortState.field = field;
+        recentMatchSortState.direction = (field === 'winner' || field === 'loser') ? 'asc' : 'desc';
+    }
+
+    updateRecentMatches(allMatches);
+};
 
 function showMessage(message, type = 'success') {
     const messageDiv = document.getElementById('message');

@@ -41,6 +41,11 @@ h2 {
     overflow-x: auto;
 }
 
+.control-group {
+    display: grid;
+    gap: 8px;
+}
+
 .rankings table {
     width: 100%;
     border-collapse: collapse;
@@ -139,31 +144,93 @@ button:disabled {
     padding: 20px;
 }
 
+.control-group label {
+    font-weight: 600;
+}
+
+.recent-matches-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 180px);
+    gap: 12px;
+    margin-bottom: 15px;
+}
+
+.recent-matches-hint {
+    color: #666;
+    font-size: 0.9em;
+    margin-bottom: 12px;
+}
+
+.control-group select {
+    max-width: 160px;
+}
+
 .recent-matches {
     max-height: 300px;
     overflow-y: auto;
 }
 
-.match-item {
-    padding: 10px;
+.recent-matches-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.recent-matches-table th,
+.recent-matches-table td {
+    padding: 12px;
+    text-align: left;
     border-bottom: 1px solid #eee;
-    display: flex;
-    justify-content: space-between;
+}
+
+.recent-matches-table th {
+    background: #f5f5f5;
+}
+
+.recent-matches-table tr:hover {
+    background: #f9f9f9;
+}
+
+.sort-header-button {
     align-items: center;
-}
-
-.match-item:last-child {
-    border-bottom: none;
-}
-
-.match-score {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    font: inherit;
     font-weight: 600;
-    color: #5d7c4f;
+    gap: 6px;
+    padding: 0;
 }
 
-.match-date {
-    color: #999;
-    font-size: 0.9em;
+.sort-header-button:hover {
+    color: #4a6240;
+}
+
+.sort-indicator {
+    color: #5d7c4f;
+    font-size: 0.85em;
+    min-width: 12px;
+    text-align: center;
+}
+
+.match-change {
+    font-size: 0.95em;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.match-change-win {
+    color: #28a745;
+}
+
+.match-change-loss {
+    color: #dc3545;
+}
+
+.recent-match-date {
+    color: #666;
+    font-size: 0.95em;
 }
 
 @media (max-width: 600px) {
@@ -182,6 +249,15 @@ button:disabled {
     .rankings th,
     .rankings td {
         padding: 8px;
+    }
+
+    .recent-matches-table th,
+    .recent-matches-table td {
+        padding: 8px;
+    }
+
+    .control-group select {
+        max-width: 100%;
     }
 }
 
