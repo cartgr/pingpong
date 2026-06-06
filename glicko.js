@@ -66,6 +66,7 @@ function loadData() {
     database.ref('players').on('value', (snapshot) => {
         const players = snapshot.val() || {};
         updateRankings(players);
+        updateRatingChart(players);
         updatePlayerSelects(players);
     });
 
@@ -76,6 +77,252 @@ function loadData() {
             id
         }));
         updateRecentMatches(matchesWithIds);
+    });
+}
+
+function getPlayerRatingMetrics(player) {
+    const rating = player.rating || player.elo || INITIAL_RATING;
+    const rd = player.rd || INITIAL_RD;
+
+    return {
+        rating,
+        rd,
+        lowerBound: rating - rd,
+        upperBound: rating + rd
+    };
+}
+
+function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, (character) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+    }[character]));
+}
+
+function getNiceTickStep(range, targetTickCount = 6) {
+    if (!Number.isFinite(range) || range <= 0) {
+        return 10;
+    }
+
+    const roughStep = range / Math.max(1, targetTickCount - 1);
+    const magnitude = 10 ** Math.floor(Math.log10(roughStep));
+    const residual = roughStep / magnitude;
+
+    let niceResidual = 1;
+    if (residual >= 5) {
+        niceResidual = 10;
+    } else if (residual >= 2) {
+        niceResidual = 5;
+    } else if (residual >= 1) {
+        niceResidual = 2;
+    }
+
+    return niceResidual * magnitude;
+}
+
+function updateRatingChart(players) {
+    const chartDiv = document.getElementById('ratingChart');
+    const tooltip = document.getElementById('ratingChartTooltip');
+
+    if (!chartDiv) {
+        return;
+    }
+
+    if (tooltip) {
+        tooltip.classList.remove('is-visible');
+        tooltip.style.left = '0px';
+        tooltip.style.top = '0px';
+    }
+
+    if (Object.keys(players).length === 0) {
+        chartDiv.innerHTML = '<p class="loading">Add players and matches to see the uncertainty chart.</p>';
+        return;
+    }
+
+    const chartPlayers = Object.entries(players)
+        .map(([name, player]) => ({
+            name,
+            ...getPlayerRatingMetrics(player)
+        }))
+        .sort((a, b) => b.rating - a.rating || a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+
+    const margin = { top: 26, right: 26, bottom: 175, left: 76 };
+    const height = 440;
+    const plotWidth = Math.max(560, chartPlayers.length * 58);
+    const width = margin.left + plotWidth + margin.right;
+    const plotLeft = margin.left;
+    const plotRight = width - margin.right;
+    const plotTop = margin.top;
+    const plotBottom = height - margin.bottom;
+    const plotHeight = plotBottom - plotTop;
+
+    const minValue = Math.min(...chartPlayers.map((player) => player.lowerBound));
+    const maxValue = Math.max(...chartPlayers.map((player) => player.upperBound));
+    const padding = Math.max(8, Math.ceil((maxValue - minValue) * 0.08) || 8);
+    const paddedMin = minValue - padding;
+    const paddedMax = maxValue + padding;
+    const tickStep = getNiceTickStep(paddedMax - paddedMin);
+    const niceMin = Math.floor(paddedMin / tickStep) * tickStep;
+    const niceMax = Math.ceil(paddedMax / tickStep) * tickStep;
+    const yRange = Math.max(tickStep, niceMax - niceMin);
+
+    const xForIndex = (index) => {
+        if (chartPlayers.length === 1) {
+            return plotLeft + plotWidth / 2;
+        }
+
+        return plotLeft + (index * plotWidth) / (chartPlayers.length - 1);
+    };
+
+    const yForValue = (value) => plotBottom - ((value - niceMin) / yRange) * plotHeight;
+
+    const ticks = [];
+    for (let tickValue = niceMin; tickValue <= niceMax + tickStep / 2; tickValue += tickStep) {
+        ticks.push(tickValue);
+    }
+
+    const horizontalGridLines = ticks.map((tickValue) => {
+        const y = yForValue(tickValue);
+        return `
+            <g>
+                <line class="chart-grid-line" x1="${plotLeft}" y1="${y}" x2="${plotRight}" y2="${y}"></line>
+                <text class="chart-tick-label" x="${plotLeft - 12}" y="${y + 4}" text-anchor="end">${tickValue}</text>
+            </g>
+        `;
+    }).join('');
+
+    const verticalGuides = chartPlayers.map((player, index) => {
+        const x = xForIndex(index);
+        return `<line class="chart-grid-line" x1="${x}" y1="${plotTop}" x2="${x}" y2="${plotBottom}"></line>`;
+    }).join('');
+
+    const pointGroups = chartPlayers.map((player, index) => {
+        const x = xForIndex(index);
+        const ratingY = yForValue(player.rating);
+        const upperY = yForValue(player.upperBound);
+        const lowerY = yForValue(player.lowerBound);
+        const hitboxTop = Math.min(upperY, lowerY) - 8;
+        const hitboxHeight = Math.abs(lowerY - upperY) + 16;
+        const labelX = x - 4;
+        const labelY = plotBottom + 10;
+        const escapedName = escapeHtml(player.name);
+        const titleText = `${player.name}: Score ${player.rating}, Upper Bound ${player.upperBound}, Lower Bound ${player.lowerBound}`;
+
+        return `
+            <g
+                class="chart-point-group"
+                data-player="${escapedName}"
+                data-rating="${player.rating}"
+                data-rd="${player.rd}"
+                data-lower="${player.lowerBound}"
+                data-upper="${player.upperBound}"
+            >
+                <title>${escapeHtml(titleText)}</title>
+                <rect class="chart-point-hitbox" x="${x - 16}" y="${hitboxTop}" width="32" height="${hitboxHeight}" rx="8" ry="8"></rect>
+                <line class="chart-error-bar" x1="${x}" y1="${upperY}" x2="${x}" y2="${lowerY}"></line>
+                <line class="chart-error-cap" x1="${x - 7}" y1="${upperY}" x2="${x + 7}" y2="${upperY}"></line>
+                <line class="chart-error-cap" x1="${x - 7}" y1="${lowerY}" x2="${x + 7}" y2="${lowerY}"></line>
+                <circle class="chart-point" cx="${x}" cy="${ratingY}" r="4.5"></circle>
+            </g>
+            <text class="chart-point-label" x="${labelX}" y="${labelY}" text-anchor="start" dominant-baseline="hanging" transform="rotate(63 ${labelX} ${labelY})">${escapedName}</text>
+        `;
+    }).join('');
+
+    chartDiv.innerHTML = `
+        <svg class="chart-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" aria-labelledby="ratingChartTitle">
+            <title id="ratingChartTitle">Player ratings with uncertainty shown as Rating Deviation (RD)</title>
+            ${horizontalGridLines}
+            ${verticalGuides}
+            <line class="chart-axis-line" x1="${plotLeft}" y1="${plotBottom}" x2="${plotRight}" y2="${plotBottom}"></line>
+            <line class="chart-axis-line" x1="${plotLeft}" y1="${plotTop}" x2="${plotLeft}" y2="${plotBottom}"></line>
+            ${pointGroups}
+            <text class="chart-axis-title" x="${plotLeft + plotWidth / 2}" y="${height - 56}" text-anchor="middle">Players</text>
+            <text class="chart-axis-title" x="24" y="${plotTop + plotHeight / 2}" text-anchor="middle" transform="rotate(-90 24 ${plotTop + plotHeight / 2})">Rating</text>
+        </svg>
+    `;
+
+    attachRatingChartInteractions();
+}
+
+function showRatingChartTooltip(group, event) {
+    const chartDiv = document.getElementById('ratingChart');
+    const tooltip = document.getElementById('ratingChartTooltip');
+
+    if (!chartDiv || !tooltip) {
+        return;
+    }
+
+    const playerName = group.dataset.player || '';
+    const rating = group.dataset.rating || '';
+    const rd = group.dataset.rd || '';
+    const lowerBound = group.dataset.lower || '';
+    const upperBound = group.dataset.upper || '';
+
+    tooltip.innerHTML = `
+        <strong>${escapeHtml(playerName)}</strong>
+        <div>Score: ${rating}</div>
+        <div>Upper Bound: ${upperBound}</div>
+        <div>Lower Bound: ${lowerBound}</div>
+    `;
+    tooltip.classList.add('is-visible');
+
+    const containerRect = chartDiv.getBoundingClientRect();
+    const tooltipWidth = tooltip.offsetWidth || 220;
+    const tooltipHeight = tooltip.offsetHeight || 100;
+    const offsetX = event.clientX - containerRect.left + chartDiv.scrollLeft + 16;
+    const offsetY = event.clientY - containerRect.top - tooltipHeight - 12;
+    const maxLeft = chartDiv.scrollLeft + chartDiv.clientWidth - tooltipWidth - 12;
+    const preferredLeft = Math.min(Math.max(chartDiv.scrollLeft + 12, offsetX), maxLeft);
+    const preferredTop = offsetY < 12
+        ? event.clientY - containerRect.top + 18
+        : offsetY;
+
+    tooltip.style.left = `${preferredLeft}px`;
+    tooltip.style.top = `${preferredTop}px`;
+}
+
+function hideRatingChartTooltip() {
+    const tooltip = document.getElementById('ratingChartTooltip');
+
+    if (!tooltip) {
+        return;
+    }
+
+    tooltip.classList.remove('is-visible');
+    tooltip.style.left = '0px';
+    tooltip.style.top = '0px';
+}
+
+function attachRatingChartInteractions() {
+    const chartDiv = document.getElementById('ratingChart');
+
+    if (!chartDiv) {
+        return;
+    }
+
+    const hitTargets = chartDiv.querySelectorAll('.chart-point-hitbox');
+    hitTargets.forEach((target) => {
+        const group = target.closest('.chart-point-group');
+        if (!group) {
+            return;
+        }
+
+        target.addEventListener('pointerenter', (event) => {
+            group.classList.add('is-hovered');
+            showRatingChartTooltip(group, event);
+        });
+
+        target.addEventListener('pointermove', (event) => {
+            showRatingChartTooltip(group, event);
+        });
+
+        target.addEventListener('pointerleave', () => {
+            group.classList.remove('is-hovered');
+            hideRatingChartTooltip();
+        });
     });
 }
 

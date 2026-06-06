@@ -37,6 +37,122 @@ h2 {
     box-shadow: 0 4px 6px rgba(0,0,0,0.1);
 }
 
+.chart-card {
+    background: linear-gradient(180deg, #f6f8f2 0%, #edf2e7 100%);
+    border-radius: 14px;
+    box-shadow: inset 0 0 0 1px rgba(93, 124, 79, 0.12);
+    color: #2f3d2b;
+    padding: 18px 18px 14px;
+    position: relative;
+}
+
+.chart-card .loading {
+    color: #5d7c4f;
+}
+
+.rating-chart {
+    overflow-x: auto;
+    overflow-y: hidden;
+    position: relative;
+}
+
+.chart-svg {
+    display: block;
+    height: auto;
+}
+
+.chart-grid-line {
+    stroke: rgba(93, 124, 79, 0.18);
+    stroke-width: 1;
+}
+
+.chart-axis-line {
+    stroke: rgba(74, 98, 64, 0.42);
+    stroke-width: 1;
+}
+
+.chart-tick-label {
+    fill: #627159;
+    font-size: 12px;
+}
+
+.chart-axis-title {
+    fill: #2f3d2b;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.chart-point-label {
+    fill: #55614d;
+    font-size: 11px;
+}
+
+.chart-error-bar,
+.chart-error-cap {
+    stroke: #5d7c4f;
+    stroke-width: 2;
+}
+
+.chart-point {
+    fill: #ffffff;
+    stroke: #5d7c4f;
+    stroke-width: 2;
+}
+
+.chart-point-group {
+    cursor: pointer;
+}
+
+.chart-point-group.is-hovered {
+    filter: drop-shadow(0 0 8px rgba(93, 124, 79, 0.28));
+}
+
+.chart-point-group.is-hovered .chart-point {
+    fill: #f4f7ef;
+    stroke: #4a6240;
+}
+
+.chart-point-group.is-hovered .chart-error-bar,
+.chart-point-group.is-hovered .chart-error-cap {
+    stroke: #4a6240;
+}
+
+.chart-point-hitbox {
+    fill: rgba(255,255,255,0.001);
+    pointer-events: all;
+}
+
+.chart-point-group.is-hovered .chart-point-hitbox {
+    fill: rgba(93, 124, 79, 0.08);
+}
+
+.chart-tooltip {
+    background: rgba(51, 70, 45, 0.96);
+    border: 1px solid rgba(168, 192, 154, 0.55);
+    border-radius: 10px;
+    box-shadow: 0 12px 28px rgba(58, 74, 47, 0.28);
+    color: #f7fbf4;
+    left: 0;
+    max-width: 240px;
+    opacity: 0;
+    padding: 10px 12px;
+    pointer-events: none;
+    position: absolute;
+    top: 0;
+    transition: opacity 0.12s ease;
+    z-index: 2;
+}
+
+.chart-tooltip.is-visible {
+    opacity: 1;
+}
+
+.chart-tooltip strong {
+    display: block;
+    font-size: 0.95rem;
+    margin-bottom: 4px;
+}
+
 .rankings {
     overflow-x: auto;
 }
@@ -173,6 +289,10 @@ button:disabled {
 
     .section {
         padding: 15px;
+    }
+
+    .chart-card {
+        padding: 14px 12px 12px;
     }
 
     .rankings {
