@@ -1,94 +1,243 @@
-// Glicko-2 constants
-const INITIAL_RATING = 1500;
-const INITIAL_RD = 350;
-const INITIAL_VOLATILITY = 0.06;
-const TAU = 0.5; // System constant
-const EPSILON = 0.000001;
+// TrueSkill defaults for head-to-head and team matches.
+const INITIAL_MU = 25;
+const INITIAL_SIGMA = INITIAL_MU / 3;
+const BETA = INITIAL_MU / 6;
+const DYNAMICS_FACTOR = INITIAL_MU / 300;
+const SEASON_START_MONTH = 9;
+const HARVARD_TIME_ZONE = 'America/New_York';
 
-// Check if admin mode is enabled
 const urlParams = new URLSearchParams(window.location.search);
 const isAdmin = urlParams.get('admin') === 'true';
 
-// Glicko-2 calculation functions
-function g(phi) {
-    return 1 / Math.sqrt(1 + 3 * phi * phi / (Math.PI * Math.PI));
+const appState = {
+    players: {},
+    matches: {},
+    selectedSeason: null,
+    matchType: '1v1'
+};
+
+function normalPdf(value) {
+    return Math.exp(-0.5 * value * value) / Math.sqrt(2 * Math.PI);
 }
 
-function E(mu, muJ, phiJ) {
-    return 1 / (1 + Math.exp(-g(phiJ) * (mu - muJ)));
+function normalCdf(value) {
+    const sign = value < 0 ? -1 : 1;
+    const x = Math.abs(value) / Math.sqrt(2);
+    const t = 1 / (1 + 0.3275911 * x);
+    const coefficients = [
+        0.254829592,
+        -0.284496736,
+        1.421413741,
+        -1.453152027,
+        1.061405429
+    ];
+    const polynomial = coefficients.reduceRight((result, coefficient) =>
+        (result + coefficient) * t
+    , 0);
+    const erf = sign * (1 - polynomial * Math.exp(-x * x));
+    return 0.5 * (1 + erf);
 }
 
-function calculateGlicko2(player1, player2, score1) {
-    // Convert from Glicko-2 scale to internal scale
-    const mu1 = (player1.rating - 1500) / 173.7178;
-    const mu2 = (player2.rating - 1500) / 173.7178;
-    const phi1 = player1.rd / 173.7178;
-    const phi2 = player2.rd / 173.7178;
-    const sigma = INITIAL_VOLATILITY; // Use fixed volatility
+function inverseMillsRatio(value) {
+    if (value < -5.5) {
+        const positive = -value;
+        return positive + 1 / positive - 2 / (positive ** 3) + 10 / (positive ** 5);
+    }
+    return normalPdf(value) / Math.max(normalCdf(value), 1e-12);
+}
 
-    // Step 3: Compute variance
-    const gPhi2 = g(phi2);
-    const gPhi1 = g(phi1);
-    const E1 = E(mu1, mu2, phi2);
-    const E2 = E(mu2, mu1, phi1);
-
-    const v1 = 1 / (gPhi2 * gPhi2 * E1 * (1 - E1));
-    const v2 = 1 / (gPhi1 * gPhi1 * E2 * (1 - E2));
-
-    // Step 4: Compute delta
-    const delta1 = v1 * gPhi2 * (score1 - E1);
-    const delta2 = v2 * gPhi1 * ((1 - score1) - E2);
-
-    // Step 6: Update rating deviation (skip volatility calculation)
-    const phiStar1 = Math.sqrt(phi1 * phi1 + sigma * sigma);
-    const phiStar2 = Math.sqrt(phi2 * phi2 + sigma * sigma);
-
-    // Step 7: Update rating and RD
-    const newPhi1 = 1 / Math.sqrt(1 / (phiStar1 * phiStar1) + 1 / v1);
-    const newPhi2 = 1 / Math.sqrt(1 / (phiStar2 * phiStar2) + 1 / v2);
-    const newMu1 = mu1 + newPhi1 * newPhi1 * gPhi2 * (score1 - E1);
-    const newMu2 = mu2 + newPhi2 * newPhi2 * gPhi1 * ((1 - score1) - E2);
-
-    // Step 8: Convert back to Glicko-2 scale
+function createTrueSkillPlayer() {
     return {
-        player1: {
-            rating: Math.round(173.7178 * newMu1 + 1500),
-            rd: Math.round(173.7178 * newPhi1)
-        },
-        player2: {
-            rating: Math.round(173.7178 * newMu2 + 1500),
-            rd: Math.round(173.7178 * newPhi2)
-        }
+        mu: INITIAL_MU,
+        sigma: INITIAL_SIGMA,
+        matches: 0,
+        wins: 0
     };
 }
 
-function loadData() {
-    database.ref('players').on('value', (snapshot) => {
-        const players = snapshot.val() || {};
-        updateRankings(players);
-        updatePlayerSelects(players);
+function rateTeams(winners, losers) {
+    const allPlayers = [...winners, ...losers];
+    const winnerMean = winners.reduce((sum, player) => sum + player.mu, 0);
+    const loserMean = losers.reduce((sum, player) => sum + player.mu, 0);
+    const variance = allPlayers.reduce((sum, player) =>
+        sum + player.sigma * player.sigma + DYNAMICS_FACTOR * DYNAMICS_FACTOR + BETA * BETA
+    , 0);
+    const performanceScale = Math.sqrt(variance);
+    const normalizedDifference = (winnerMean - loserMean) / performanceScale;
+    const v = inverseMillsRatio(normalizedDifference);
+    const w = Math.min(v * (v + normalizedDifference), 0.9999);
+
+    const updatePlayer = (player, direction) => {
+        const adjustedVariance = player.sigma * player.sigma + DYNAMICS_FACTOR * DYNAMICS_FACTOR;
+        const meanMultiplier = adjustedVariance / performanceScale;
+        const varianceMultiplier = adjustedVariance / variance;
+        return {
+            ...player,
+            mu: player.mu + direction * meanMultiplier * v,
+            sigma: Math.sqrt(Math.max(adjustedVariance * (1 - varianceMultiplier * w), 0.0001))
+        };
+    };
+
+    return {
+        winners: winners.map(player => updatePlayer(player, 1)),
+        losers: losers.map(player => updatePlayer(player, -1))
+    };
+}
+
+function getMatchTeams(match) {
+    const winnerTeam = Array.isArray(match.winnerTeam)
+        ? match.winnerTeam
+        : (match.winner ? [match.winner] : []);
+    const loserTeam = Array.isArray(match.loserTeam)
+        ? match.loserTeam
+        : (match.loser ? [match.loser] : []);
+    return { winnerTeam, loserTeam };
+}
+
+function formatTrueSkill(value) {
+    return Number(value).toFixed(2);
+}
+
+function getHarvardDateParts(date) {
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: HARVARD_TIME_ZONE,
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric'
+    }).formatToParts(date);
+
+    return Object.fromEntries(
+        parts
+            .filter(part => part.type !== 'literal')
+            .map(part => [part.type, Number(part.value)])
+    );
+}
+
+function getSeasonStartYear(dateValue = new Date()) {
+    const date = dateValue instanceof Date ? dateValue : new Date(dateValue);
+    const { year, month } = getHarvardDateParts(date);
+    return month >= SEASON_START_MONTH ? year : year - 1;
+}
+
+function getCurrentSeason() {
+    return getSeasonStartYear(new Date());
+}
+
+function getSeasonLabel(startYear) {
+    const shortStart = String(startYear).slice(-2);
+    const shortEnd = String(startYear + 1).slice(-2);
+    return `${shortStart}/${shortEnd}`;
+}
+
+function getSeasonDateLabel(startYear) {
+    return `Sep 1, ${startYear} – Aug 31, ${startYear + 1}`;
+}
+
+function getAvailableSeasons() {
+    const seasons = new Set([getCurrentSeason()]);
+    Object.values(appState.matches).forEach(match => {
+        if (match.timestamp) seasons.add(getSeasonStartYear(match.timestamp));
+    });
+    return [...seasons].sort((a, b) => b - a);
+}
+
+function escapeHtml(value) {
+    const div = document.createElement('div');
+    div.textContent = String(value);
+    return div.innerHTML;
+}
+
+function calculateSeason(startYear, matches = appState.matches) {
+    const seasonMatches = Object.entries(matches)
+        .filter(([, match]) => match.timestamp && getSeasonStartYear(match.timestamp) === startYear)
+        .map(([id, match]) => ({ ...match, id }))
+        .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+    const names = new Set();
+    seasonMatches.forEach(match => {
+        const { winnerTeam, loserTeam } = getMatchTeams(match);
+        [...winnerTeam, ...loserTeam].forEach(name => names.add(name));
     });
 
-    database.ref('matches').limitToLast(10).on('value', (snapshot) => {
-        const matches = snapshot.val() || {};
-        const matchesWithIds = Object.entries(matches).map(([id, match]) => ({
+    const players = {};
+    names.forEach(name => {
+        players[name] = createTrueSkillPlayer();
+    });
+
+    const calculatedMatches = [];
+    seasonMatches.forEach(match => {
+        const { winnerTeam, loserTeam } = getMatchTeams(match);
+        if (winnerTeam.length === 0 || loserTeam.length === 0) return;
+        if ([...winnerTeam, ...loserTeam].some(name => !players[name])) return;
+
+        const winnerPlayers = winnerTeam.map(name => players[name]);
+        const loserPlayers = loserTeam.map(name => players[name]);
+        const beforeMu = Object.fromEntries(
+            [...winnerTeam, ...loserTeam].map(name => [name, players[name].mu])
+        );
+        const rated = rateTeams(winnerPlayers, loserPlayers);
+
+        winnerTeam.forEach((name, index) => {
+            players[name] = {
+                ...rated.winners[index],
+                matches: players[name].matches + 1,
+                wins: players[name].wins + 1
+            };
+        });
+        loserTeam.forEach((name, index) => {
+            players[name] = {
+                ...rated.losers[index],
+                matches: players[name].matches + 1,
+                wins: players[name].wins
+            };
+        });
+
+        const ratingChanges = Object.fromEntries(
+            [...winnerTeam, ...loserTeam].map(name => [name, players[name].mu - beforeMu[name]])
+        );
+        calculatedMatches.push({
             ...match,
-            id
-        }));
-        updateRecentMatches(matchesWithIds);
+            winnerTeam,
+            loserTeam,
+            ratingChanges
+        });
+    });
+
+    return { players, matches: calculatedMatches };
+}
+
+function renderSeasonTabs() {
+    const tabs = document.getElementById('seasonTabs');
+    tabs.innerHTML = '';
+
+    getAvailableSeasons().forEach(startYear => {
+        const button = document.createElement('button');
+        const isActive = startYear === appState.selectedSeason;
+        button.type = 'button';
+        button.className = `season-tab${isActive ? ' active' : ''}`;
+        button.textContent = getSeasonLabel(startYear);
+        button.setAttribute('role', 'tab');
+        button.setAttribute('aria-selected', String(isActive));
+        button.addEventListener('click', () => {
+            appState.selectedSeason = startYear;
+            render();
+        });
+        tabs.appendChild(button);
     });
 }
 
 function updateRankings(players) {
     const rankingsDiv = document.getElementById('rankings');
+    const entries = Object.entries(players);
 
-    if (Object.keys(players).length === 0) {
-        rankingsDiv.innerHTML = '<p>No players yet. Add a player to get started!</p>';
+    if (entries.length === 0) {
+        rankingsDiv.innerHTML = '<p>No players competed in this season.</p>';
         return;
     }
 
-    const sortedPlayers = Object.entries(players)
-        .sort((a, b) => (b[1].rating || b[1].elo || INITIAL_RATING) - (a[1].rating || a[1].elo || INITIAL_RATING));
+    const sortedPlayers = entries.sort((a, b) =>
+        b[1].mu - a[1].mu || b[1].wins - a[1].wins || a[0].localeCompare(b[0])
+    );
 
     let html = `
         <table>
@@ -96,208 +245,247 @@ function updateRankings(players) {
                 <tr>
                     <th>Rank</th>
                     <th>Player</th>
-                    <th>
-                        Rating
-                        <span class="info-icon" onclick="showInfo('rating')">ⓘ</span>
-                    </th>
-                    <th>
-                        RD
-                        <span class="info-icon" onclick="showInfo('rd')">ⓘ</span>
-                    </th>
+                    <th>Skill (μ) <button type="button" class="info-icon" onclick="showInfo('skill')" aria-label="About TrueSkill skill">ⓘ</button></th>
+                    <th>Uncertainty (σ) <button type="button" class="info-icon" onclick="showInfo('uncertainty')" aria-label="About TrueSkill uncertainty">ⓘ</button></th>
+                    <th>Record</th>
                     <th>Win Rate</th>
-                    ${isAdmin ? '<th>Action</th>' : ''}
+                    ${isAdmin && appState.selectedSeason === getCurrentSeason() ? '<th>Action</th>' : ''}
                 </tr>
             </thead>
             <tbody>
     `;
+    let mobileHtml = '<div class="mobile-rankings">';
 
-    sortedPlayers.forEach((([name, player], index) => {
+    sortedPlayers.forEach(([name, player], index) => {
         const rank = index + 1;
         const rankClass = rank <= 3 ? `rank-${rank}` : '';
+        const losses = player.matches - player.wins;
         const winRate = player.matches > 0 ? ((player.wins / player.matches) * 100).toFixed(1) : '0.0';
-
-        const rating = player.rating || player.elo || INITIAL_RATING;
-        const rd = player.rd || INITIAL_RD;
-
-        const deleteButton = isAdmin ? `<td><button class="delete-btn" onclick="deletePlayer('${name}')">Delete</button></td>` : '';
+        const canDelete = isAdmin && appState.selectedSeason === getCurrentSeason() && appState.players[name];
 
         html += `
             <tr>
                 <td class="${rankClass}">${rank}</td>
-                <td>${name}</td>
-                <td>${rating}</td>
-                <td>${rd}</td>
+                <td>${escapeHtml(name)}</td>
+                <td>${formatTrueSkill(player.mu)}</td>
+                <td>${formatTrueSkill(player.sigma)}</td>
+                <td>${player.wins}-${losses}</td>
                 <td>${winRate}%</td>
-                ${deleteButton}
+                ${canDelete ? `<td><button class="delete-btn" data-delete-player="${escapeHtml(name)}">Delete</button></td>` : (isAdmin && appState.selectedSeason === getCurrentSeason() ? '<td></td>' : '')}
             </tr>
         `;
-    }));
+        mobileHtml += `
+            <div class="mobile-ranking-row">
+                <span class="mobile-rank ${rankClass}">${rank}</span>
+                <span class="mobile-player" title="${escapeHtml(name)}">${escapeHtml(name)}</span>
+                <span class="mobile-stat"><small>Skill μ</small>${formatTrueSkill(player.mu)}</span>
+                <span class="mobile-stat"><small>Record</small>${player.wins}-${losses}</span>
+                ${canDelete ? `<button class="delete-btn mobile-delete" data-delete-player="${escapeHtml(name)}">Delete</button>` : ''}
+            </div>
+        `;
+    });
 
-    html += `
-            </tbody>
-        </table>
-    `;
-
-    rankingsDiv.innerHTML = html;
+    html += '</tbody></table>';
+    mobileHtml += '</div>';
+    rankingsDiv.innerHTML = html + mobileHtml;
 }
 
-function updatePlayerSelects(players) {
-    const winnerSelect = document.getElementById('winner');
-    const loserSelect = document.getElementById('loser');
-
+function updatePlayerOptions(players) {
     const playerOptions = Object.keys(players)
         .sort()
-        .map(name => `<option value="${name}">${name}</option>`)
+        .map(name => `<option value="${escapeHtml(name)}"></option>`)
         .join('');
 
-    winnerSelect.innerHTML = '<option value="">Select player</option>' + playerOptions;
-    loserSelect.innerHTML = '<option value="">Select player</option>' + playerOptions;
+    document.getElementById('playerOptions').innerHTML = playerOptions;
+}
+
+function findPlayerName(value) {
+    const normalizedValue = String(value || '').trim().toLocaleLowerCase();
+    return Object.keys(appState.players).find(name =>
+        name.toLocaleLowerCase() === normalizedValue
+    );
+}
+
+function formatSkillChange(change) {
+    const rounded = Number(change).toFixed(2);
+    return change >= 0 ? `+${rounded}` : rounded;
+}
+
+function formatMatchTeam(team, ratingChanges, resultClass) {
+    return team.map(name => `
+        <span class="match-player">
+            <strong>${escapeHtml(name)}</strong>
+            <span class="skill-change ${resultClass}">(${formatSkillChange(ratingChanges[name] || 0)})</span>
+        </span>
+    `).join('<span class="team-separator"> &amp; </span>');
 }
 
 function updateRecentMatches(matches) {
     const matchesDiv = document.getElementById('recentMatches');
-
-    if (!matches || matches.length === 0) {
-        matchesDiv.innerHTML = '<p>No matches played yet.</p>';
+    if (matches.length === 0) {
+        matchesDiv.innerHTML = '<p>No matches have been played in this season yet.</p>';
         return;
     }
 
-    const sortedMatches = matches.sort((a, b) =>
-        new Date(b.timestamp) - new Date(a.timestamp)
-    );
-
-    let html = '';
-    sortedMatches.forEach(match => {
-        const date = new Date(match.timestamp).toLocaleDateString();
-        const deleteButton = isAdmin ? `<button class="delete-btn" onclick="deleteMatch('${match.id}')">Delete</button>` : '';
-
-        // Support both old Elo and new Glicko-2 rating changes
-        const winnerChange = (match.winnerRatingChange !== undefined) ?
-            `<span style="color: #28a745; font-weight: bold;">(+${match.winnerRatingChange})</span>` :
-            (match.winnerEloChange ?
-                `<span style="color: #28a745; font-weight: bold;">(+${match.winnerEloChange})</span>` : '');
-
-        const loserChange = (match.loserRatingChange !== undefined) ?
-            `<span style="color: #dc3545; font-weight: bold;">(${match.loserRatingChange})</span>` :
-            (match.loserEloChange ?
-                `<span style="color: #dc3545; font-weight: bold;">(${match.loserEloChange})</span>` : '');
-
-        html += `
+    const sortedMatches = [...matches].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+    matchesDiv.innerHTML = sortedMatches.map(match => {
+        const date = new Date(match.timestamp).toLocaleDateString('en-US', {
+            timeZone: HARVARD_TIME_ZONE,
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric'
+        });
+        const deleteButton = isAdmin
+            ? `<button class="delete-btn" data-delete-match="${match.id}">Delete</button>`
+            : '';
+        const winnerDisplay = formatMatchTeam(match.winnerTeam, match.ratingChanges, 'positive');
+        const loserDisplay = formatMatchTeam(match.loserTeam, match.ratingChanges, 'negative');
+        return `
             <div class="match-item">
-                <div>
-                    <strong>${match.winner}</strong> ${winnerChange} defeated <strong>${match.loser}</strong> ${loserChange}
+                <div class="match-result">
+                    <span class="match-team">${winnerDisplay}</span>
+                    <span class="match-outcome">defeated</span>
+                    <span class="match-team">${loserDisplay}</span>
                 </div>
-                <div style="display: flex; gap: 10px; align-items: center;">
+                <div class="match-meta">
                     <span class="match-date">${date}</span>
                     ${deleteButton}
                 </div>
             </div>
         `;
-    });
-
-    matchesDiv.innerHTML = html;
+    }).join('');
 }
 
-function showMessage(message, type = 'success') {
-    const messageDiv = document.getElementById('message');
-    messageDiv.textContent = message;
-    messageDiv.className = `message ${type}`;
+function render() {
+    if (appState.selectedSeason === null) {
+        appState.selectedSeason = getCurrentSeason();
+    }
 
-    setTimeout(() => {
-        messageDiv.className = 'message';
-    }, 5000);
+    const season = calculateSeason(appState.selectedSeason);
+
+    renderSeasonTabs();
+    document.getElementById('activeSeasonDates').textContent = getSeasonDateLabel(appState.selectedSeason);
+    document.getElementById('rankingsTitle').textContent = 'Season Rankings';
+    document.getElementById('seasonMatchCount').textContent = `${season.matches.length} ${season.matches.length === 1 ? 'match' : 'matches'}`;
+    document.getElementById('matchesTitle').textContent = 'Season Matches';
+    document.getElementById('submitMatchTitle').textContent = 'Submit Match Result';
+
+    updateRankings(season.players);
+    updateRecentMatches(season.matches);
+    updatePlayerOptions(appState.players);
+}
+
+function loadData() {
+    database.ref().on('value', snapshot => {
+        const data = snapshot.val() || {};
+        appState.players = data.players || {};
+        appState.matches = data.matches || {};
+        render();
+    }, error => {
+        showMessage(`Error loading data: ${error.message}`, 'error');
+    });
+}
+
+function getCurrentSeasonPlayerUpdates(matches) {
+    const currentSeason = calculateSeason(getCurrentSeason(), matches);
+    const updates = {};
+    Object.keys(appState.players).forEach(name => {
+        const player = currentSeason.players[name] || createTrueSkillPlayer();
+        updates[`players/${name}`] = {
+            mu: player.mu,
+            sigma: player.sigma,
+            matches: player.matches,
+            wins: player.wins
+        };
+    });
+    return updates;
 }
 
 async function submitMatch(matchData) {
     try {
-        const playersRef = database.ref('players');
-        const snapshot = await playersRef.once('value');
-        const players = snapshot.val() || {};
+        const timestamp = new Date().toISOString();
+        const matchRef = database.ref('matches').push();
+        const draftMatch = { ...matchData, timestamp };
+        const projectedMatches = {
+            ...appState.matches,
+            [matchRef.key]: draftMatch
+        };
+        const currentSeason = calculateSeason(getCurrentSeason(), projectedMatches);
+        const calculatedMatch = currentSeason.matches.find(match => match.id === matchRef.key);
 
-        let winner = players[matchData.winner];
-        let loser = players[matchData.loser];
+        if (!calculatedMatch) throw new Error('Could not calculate the new match');
 
-        if (!winner || !loser) {
-            showMessage('Players not found. Please add them first.', 'error');
-            return;
-        }
+        const updates = getCurrentSeasonPlayerUpdates(projectedMatches);
+        updates[`matches/${matchRef.key}`] = {
+            ...draftMatch,
+            ratingChanges: calculatedMatch.ratingChanges
+        };
 
-        // Ensure players have Glicko-2 ratings
-        if (!winner.rating) {
-            winner = {
-                ...winner,
-                rating: winner.elo || INITIAL_RATING,
-                rd: INITIAL_RD
-            };
-        }
-        if (!loser.rating) {
-            loser = {
-                ...loser,
-                rating: loser.elo || INITIAL_RATING,
-                rd: INITIAL_RD
-            };
-        }
-
-        const oldWinnerRating = winner.rating;
-        const oldLoserRating = loser.rating;
-
-        // Calculate new Glicko-2 ratings
-        const newRatings = calculateGlicko2(winner, loser, 1); // Winner scored 1, loser scored 0
-
-        const winnerChange = newRatings.player1.rating - oldWinnerRating;
-        const loserChange = newRatings.player2.rating - oldLoserRating;
-
-        await database.ref(`players/${matchData.winner}`).update({
-            rating: newRatings.player1.rating,
-            rd: newRatings.player1.rd,
-            matches: (winner.matches || 0) + 1,
-            wins: (winner.wins || 0) + 1
-        });
-
-        await database.ref(`players/${matchData.loser}`).update({
-            rating: newRatings.player2.rating,
-            rd: newRatings.player2.rd,
-            matches: (loser.matches || 0) + 1,
-            wins: loser.wins || 0
-        });
-
-        await database.ref('matches').push({
-            ...matchData,
-            winnerRatingChange: winnerChange,
-            loserRatingChange: loserChange,
-            timestamp: new Date().toISOString()
-        });
-
-        showMessage('Match submitted successfully!');
+        await database.ref().update(updates);
+        showMessage('Match added to the current season!');
+        return true;
     } catch (error) {
-        showMessage('Error submitting match: ' + error.message, 'error');
+        showMessage(`Error submitting match: ${error.message}`, 'error');
+        return false;
     }
 }
 
-document.getElementById('matchForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
+function setMatchType(matchType) {
+    appState.matchType = matchType;
+    const isDoubles = matchType === '2v2';
 
-    const formData = new FormData(e.target);
-    const winner = formData.get('winner');
-    const loser = formData.get('loser');
+    document.querySelectorAll('[data-match-type]').forEach(button => {
+        const isActive = button.dataset.matchType === matchType;
+        button.classList.toggle('active', isActive);
+        button.setAttribute('aria-pressed', String(isActive));
+    });
+    document.querySelectorAll('.partner-field').forEach(field => {
+        field.hidden = !isDoubles;
+        const input = field.querySelector('input');
+        input.required = isDoubles;
+        if (!isDoubles) input.value = '';
+    });
+    document.querySelector('label[for="winner1"]').textContent = isDoubles ? 'Player 1' : 'Player';
+    document.querySelector('label[for="loser1"]').textContent = isDoubles ? 'Player 1' : 'Player';
+}
 
-    if (winner === loser) {
-        showMessage('Winner and loser must be different players', 'error');
+document.querySelectorAll('[data-match-type]').forEach(button => {
+    button.addEventListener('click', () => setMatchType(button.dataset.matchType));
+});
+
+document.getElementById('matchForm').addEventListener('submit', async event => {
+    event.preventDefault();
+    const formData = new FormData(event.target);
+    const winnerTeam = [findPlayerName(formData.get('winner1'))];
+    const loserTeam = [findPlayerName(formData.get('loser1'))];
+
+    if (appState.matchType === '2v2') {
+        winnerTeam.push(findPlayerName(formData.get('winner2')));
+        loserTeam.push(findPlayerName(formData.get('loser2')));
+    }
+
+    const allPlayers = [...winnerTeam, ...loserTeam];
+    if (allPlayers.some(name => !name)) {
+        showMessage('Please choose every player from the list', 'error');
         return;
     }
 
-    await submitMatch({
-        winner,
-        loser
-    });
+    if (new Set(allPlayers).size !== allPlayers.length) {
+        showMessage('Each player can only appear once in a match', 'error');
+        return;
+    }
 
-    e.target.reset();
+    const submitted = await submitMatch({
+        format: appState.matchType,
+        winnerTeam,
+        loserTeam
+    });
+    if (submitted) event.target.reset();
 });
 
-document.getElementById('playerForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-
-    const formData = new FormData(e.target);
+document.getElementById('playerForm').addEventListener('submit', async event => {
+    event.preventDefault();
+    const formData = new FormData(event.target);
     const playerName = formData.get('playerName').trim();
 
     if (!playerName) {
@@ -307,161 +495,119 @@ document.getElementById('playerForm').addEventListener('submit', async (e) => {
 
     try {
         const snapshot = await database.ref(`players/${playerName}`).once('value');
-
         if (snapshot.exists()) {
             showMessage('Player already exists', 'error');
             return;
         }
 
         await database.ref(`players/${playerName}`).set({
-            rating: INITIAL_RATING,
-            rd: INITIAL_RD,
+            mu: INITIAL_MU,
+            sigma: INITIAL_SIGMA,
             matches: 0,
             wins: 0
         });
-
         showMessage(`Player ${playerName} added successfully!`);
-        e.target.reset();
+        event.target.reset();
     } catch (error) {
-        showMessage('Error adding player: ' + error.message, 'error');
+        showMessage(`Error adding player: ${error.message}`, 'error');
     }
 });
 
-// Function to recalculate all ratings from match history
-async function recalculateAllRatings() {
-    try {
-        // Get all matches and players
-        const matchesSnapshot = await database.ref('matches').once('value');
-        const playersSnapshot = await database.ref('players').once('value');
+document.getElementById('rankings').addEventListener('click', event => {
+    const button = event.target.closest('[data-delete-player]');
+    if (button) window.deletePlayer(button.dataset.deletePlayer);
+});
 
-        const matches = matchesSnapshot.val() || {};
-        const players = playersSnapshot.val() || {};
+document.getElementById('recentMatches').addEventListener('click', event => {
+    const button = event.target.closest('[data-delete-match]');
+    if (button) window.deleteMatch(button.dataset.deleteMatch);
+});
 
-        // Reset all players to initial values
-        const resetPlayers = {};
-        Object.keys(players).forEach(name => {
-            resetPlayers[name] = {
-                rating: INITIAL_RATING,
-                rd: INITIAL_RD,
-                matches: 0,
-                wins: 0
-            };
-        });
-
-        // Sort matches by timestamp
-        const sortedMatches = Object.entries(matches)
-            .map(([id, match]) => ({ ...match, id }))
-            .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-
-        // Replay all matches in chronological order
-        for (const match of sortedMatches) {
-            const winner = resetPlayers[match.winner];
-            const loser = resetPlayers[match.loser];
-
-            if (!winner || !loser) continue; // Skip if player doesn't exist
-
-            // Calculate new ratings
-            const newRatings = calculateGlicko2(winner, loser, 1);
-
-            // Update winner
-            resetPlayers[match.winner] = {
-                ...newRatings.player1,
-                matches: winner.matches + 1,
-                wins: winner.wins + 1
-            };
-
-            // Update loser
-            resetPlayers[match.loser] = {
-                ...newRatings.player2,
-                matches: loser.matches + 1,
-                wins: loser.wins
-            };
-
-            // Update the match with new rating changes
-            const winnerChange = newRatings.player1.rating - winner.rating;
-            const loserChange = newRatings.player2.rating - loser.rating;
-
-            await database.ref(`matches/${match.id}`).update({
-                winnerRatingChange: winnerChange,
-                loserRatingChange: loserChange
-            });
-        }
-
-        // Update all players in database
-        const updates = {};
-        Object.entries(resetPlayers).forEach(([name, player]) => {
-            updates[`players/${name}`] = player;
-        });
-
-        await database.ref().update(updates);
-
-        return true;
-    } catch (error) {
-        console.error('Error recalculating ratings:', error);
-        throw error;
-    }
+function showMessage(message, type = 'success') {
+    const messageDiv = document.getElementById('message');
+    messageDiv.textContent = message;
+    messageDiv.className = `message ${type}`;
+    setTimeout(() => {
+        messageDiv.className = 'message';
+    }, 5000);
 }
 
-// Admin functions
 window.deletePlayer = async function(playerName) {
-    if (confirm(`Are you sure you want to delete ${playerName}? This cannot be undone.`)) {
-        try {
-            await database.ref(`players/${playerName}`).remove();
-            showMessage(`Player ${playerName} deleted`);
-        } catch (error) {
-            showMessage('Error deleting player: ' + error.message, 'error');
-        }
+    if (!confirm(`Are you sure you want to delete ${playerName}? This cannot be undone.`)) return;
+    try {
+        await database.ref(`players/${playerName}`).remove();
+        showMessage(`Player ${playerName} deleted`);
+    } catch (error) {
+        showMessage(`Error deleting player: ${error.message}`, 'error');
     }
 };
 
 window.deleteMatch = async function(matchId) {
-    if (confirm('Are you sure you want to delete this match? Ratings will be recalculated from match history.')) {
-        try {
-            // Delete the match first
-            await database.ref(`matches/${matchId}`).remove();
-
-            // Show immediate feedback
-            showMessage('Match deleted, recalculating ratings...');
-
-            // Recalculate all ratings
-            await recalculateAllRatings();
-
-            showMessage('Match deleted and ratings recalculated successfully!');
-        } catch (error) {
-            showMessage('Error: ' + error.message, 'error');
-        }
+    if (!confirm('Are you sure you want to delete this match? Season ratings will be recalculated.')) return;
+    try {
+        const projectedMatches = { ...appState.matches };
+        delete projectedMatches[matchId];
+        const updates = getCurrentSeasonPlayerUpdates(projectedMatches);
+        updates[`matches/${matchId}`] = null;
+        await database.ref().update(updates);
+        showMessage('Match deleted and season ratings recalculated.');
+    } catch (error) {
+        showMessage(`Error deleting match: ${error.message}`, 'error');
     }
 };
 
-// Info popup function
 window.showInfo = function(type) {
-    let message = '';
-    switch(type) {
-        case 'rating':
-            message = 'Glicko-2 rating: Your skill level (1500 = average). Higher is better! <a href="https://en.wikipedia.org/wiki/Glicko_rating_system" target="_blank" style="color: #5d7c4f;">Learn more →</a>';
-            break;
-        case 'rd':
-            message = 'Rating Deviation: How uncertain your rating is (0-350). Lower = more accurate rating.';
-            break;
-    }
+    const info = {
+        skill: {
+            title: 'TrueSkill skill (μ)',
+            description: 'Your estimated skill for the selected season. Everyone starts at 25.00, and a higher number means stronger results.'
+        },
+        uncertainty: {
+            title: 'TrueSkill uncertainty (σ)',
+            description: 'How uncertain the system is about your skill. Everyone starts at 8.33, and the number generally falls as they play more matches.'
+        }
+    };
 
-    // Create popup
+    const selectedInfo = info[type];
+    if (!selectedInfo) return;
+
+    document.querySelector('.info-popup')?.remove();
     const popup = document.createElement('div');
     popup.className = 'info-popup';
     popup.innerHTML = `
-        <div class="info-content">
-            ${message}
-            <button onclick="this.parentElement.parentElement.remove()">Got it</button>
+        <div class="info-content" role="dialog" aria-modal="true" aria-labelledby="info-title">
+            <div class="info-header">
+                <h2 id="info-title">${selectedInfo.title}</h2>
+                <button type="button" class="info-close" aria-label="Close">×</button>
+            </div>
+            <p>${selectedInfo.description}</p>
+            <a class="info-link" href="https://www.microsoft.com/en-us/research/project/trueskill-ranking-system/" target="_blank" rel="noopener">Learn about TrueSkill</a>
         </div>
     `;
+
+    const closePopup = () => {
+        document.removeEventListener('keydown', handleKeydown);
+        document.body.classList.remove('modal-open');
+        popup.remove();
+    };
+    const handleKeydown = event => {
+        if (event.key === 'Escape') closePopup();
+    };
+
+    popup.querySelector('.info-close').addEventListener('click', closePopup);
+    popup.addEventListener('click', event => {
+        if (event.target === popup) closePopup();
+    });
+    document.addEventListener('keydown', handleKeydown);
+    document.body.classList.add('modal-open');
     document.body.appendChild(popup);
+    popup.querySelector('.info-close').focus();
 };
 
-// Show admin mode indicator if active
 if (isAdmin) {
     document.addEventListener('DOMContentLoaded', () => {
         const h1 = document.querySelector('h1');
-        h1.innerHTML += ' <span style="color: red; font-size: 0.5em;">(Admin Mode)</span>';
+        h1.insertAdjacentHTML('beforeend', ' <span style="color: red; font-size: 0.5em;">(Admin Mode)</span>');
     });
 }
 

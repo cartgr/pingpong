@@ -4,7 +4,7 @@
       ".read": true,
       ".write": true,
       "$player": {
-        ".validate": "newData.hasChildren(['elo', 'matches', 'wins'])"
+        ".validate": "newData.hasChildren(['mu', 'sigma', 'matches', 'wins']) && newData.child('mu').isNumber() && newData.child('sigma').isNumber() && newData.child('sigma').val() > 0 && newData.child('matches').isNumber() && newData.child('wins').isNumber()"
       }
     },
     "matches": {
@@ -12,7 +12,7 @@
       ".write": true,
       ".indexOn": ["timestamp"],
       "$match": {
-        ".validate": "newData.hasChildren(['winner', 'loser', 'winnerScore', 'loserScore', 'timestamp'])"
+        ".validate": "newData.hasChildren(['winnerTeam', 'loserTeam', 'format', 'timestamp']) && newData.child('winnerTeam').child('0').isString() && newData.child('loserTeam').child('0').isString() && ((newData.child('format').val() === '1v1' && !newData.child('winnerTeam').hasChild('1') && !newData.child('loserTeam').hasChild('1')) || (newData.child('format').val() === '2v2' && newData.child('winnerTeam').child('1').isString() && newData.child('loserTeam').child('1').isString() && !newData.child('winnerTeam').hasChild('2') && !newData.child('loserTeam').hasChild('2')))"
       }
     }
   }

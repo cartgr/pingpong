@@ -6,13 +6,14 @@
 
 body {
     font-family: 'Comic Sans MS', 'Chalkboard SE', 'Marker Felt', cursive, sans-serif;
-    background: linear-gradient(135deg, #87a878 0%, #a8c09a 100%);
+    background: #9db58f;
     min-height: 100vh;
     padding: 20px;
 }
 
 .container {
     max-width: 800px;
+    width: 100%;
     margin: 0 auto;
 }
 
@@ -31,10 +32,100 @@ h2 {
 
 .section {
     background: white;
-    border-radius: 10px;
+    border-radius: 4px;
     padding: 20px;
     margin-bottom: 20px;
     box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.season-bar {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: #405b36;
+    color: white;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+    margin: -20px -20px 24px;
+    padding: 10px 20px;
+}
+
+.season-bar-inner {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+}
+
+.section-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+}
+
+.section-heading h2 {
+    margin-bottom: 0;
+}
+
+.season-bar-label {
+    color: #cbdac5;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.season-dates {
+    color: #d8e4d3;
+    font-size: 0.8rem;
+    margin-left: auto;
+    white-space: nowrap;
+}
+
+.section-meta {
+    color: #777;
+    font-size: 0.9rem;
+}
+
+.season-tabs {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+
+.season-tabs::-webkit-scrollbar {
+    display: none;
+}
+
+.season-tab {
+    flex: 0 0 auto;
+    background: transparent;
+    color: #e8f0e5;
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 2px;
+    padding: 7px 13px;
+    font-size: 0.95rem;
+    min-height: 40px;
+}
+
+.season-tab:hover {
+    background: rgba(255,255,255,0.12);
+}
+
+.season-tab.active {
+    background: white;
+    border-color: white;
+    color: #405b36;
+}
+
+.section-description {
+    color: #777;
+    font-size: 0.9rem;
+    margin: -7px 0 16px;
 }
 
 .rankings {
@@ -62,6 +153,10 @@ h2 {
     background: #f9f9f9;
 }
 
+.mobile-rankings {
+    display: none;
+}
+
 .rank-1 { color: #FFD700; font-weight: bold; }
 .rank-2 { color: #C0C0C0; font-weight: bold; }
 .rank-3 { color: #CD7F32; font-weight: bold; }
@@ -70,6 +165,54 @@ h2 {
 .player-form {
     display: grid;
     gap: 15px;
+}
+
+.match-type-toggle {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+    background: #eef2ec;
+    padding: 4px;
+}
+
+.match-type-button {
+    background: transparent;
+    color: #52634b;
+}
+
+.match-type-button:hover {
+    background: #dfe7db;
+}
+
+.match-type-button.active {
+    background: #5d7c4f;
+    color: white;
+}
+
+.team-fields {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.team-card {
+    border: 1px solid #dfe5dc;
+    min-width: 0;
+    padding: 12px;
+}
+
+.team-card legend {
+    color: #405b36;
+    font-weight: 700;
+    padding: 0 5px;
+}
+
+.team-card .form-group + .form-group {
+    margin-top: 10px;
+}
+
+.partner-field[hidden] {
+    display: none;
 }
 
 .form-group {
@@ -84,11 +227,13 @@ label {
 
 input[type="text"],
 input[type="number"],
+input[type="search"],
 select {
     padding: 10px;
     border: 1px solid #ddd;
-    border-radius: 5px;
+    border-radius: 3px;
     font-size: 16px;
+    min-height: 44px;
 }
 
 button {
@@ -96,11 +241,13 @@ button {
     color: white;
     padding: 12px 24px;
     border: none;
-    border-radius: 5px;
+    border-radius: 3px;
     font-size: 16px;
     cursor: pointer;
     transition: background 0.3s;
     font-family: inherit;
+    min-height: 44px;
+    touch-action: manipulation;
 }
 
 button:hover {
@@ -115,7 +262,7 @@ button:disabled {
 .message {
     margin-top: 15px;
     padding: 10px;
-    border-radius: 5px;
+    border-radius: 3px;
     display: none;
 }
 
@@ -140,7 +287,7 @@ button:disabled {
 }
 
 .recent-matches {
-    max-height: 300px;
+    max-height: 420px;
     overflow-y: auto;
 }
 
@@ -150,6 +297,38 @@ button:disabled {
     display: flex;
     justify-content: space-between;
     align-items: center;
+}
+
+.match-result,
+.match-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.match-team,
+.match-player {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 3px;
+}
+
+.team-separator,
+.match-outcome {
+    color: #777;
+}
+
+.skill-change {
+    font-weight: 700;
+    font-size: 0.9em;
+}
+
+.skill-change.positive {
+    color: #27833b;
+}
+
+.skill-change.negative {
+    color: #c8323f;
 }
 
 .match-item:last-child {
@@ -167,21 +346,144 @@ button:disabled {
 }
 
 @media (max-width: 600px) {
+    body {
+        padding: 0 12px 18px;
+    }
+
     h1 {
-        font-size: 1.8em;
+        font-size: 1.75em;
+        margin: 22px 0;
     }
 
     .section {
-        padding: 15px;
+        padding: 14px;
+        margin-bottom: 12px;
+    }
+
+    .season-bar {
+        padding: max(8px, env(safe-area-inset-top)) 12px 8px;
+        margin: 0 -12px 14px;
+    }
+
+    .section-heading {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .season-bar-inner {
+        gap: 8px;
+    }
+
+    .season-tabs {
+        flex: 1;
+    }
+
+    .season-dates {
+        display: none;
+    }
+
+    .match-item {
+        align-items: flex-start;
+        gap: 10px;
+        padding: 12px 2px;
+        flex-direction: column;
     }
 
     .rankings {
-        font-size: 0.9em;
+        overflow: visible;
     }
 
-    .rankings th,
-    .rankings td {
-        padding: 8px;
+    .rankings table {
+        display: none;
+    }
+
+    .mobile-rankings {
+        display: grid;
+        gap: 8px;
+        margin-top: 12px;
+        min-width: 0;
+        width: 100%;
+    }
+
+    .mobile-ranking-row {
+        display: grid;
+        grid-template-columns: 30px minmax(0, 1fr) auto auto;
+        align-items: center;
+        gap: 6px 10px;
+        background: #f7f9f6;
+        border: 1px solid #e4e9e1;
+        padding: 10px;
+        max-width: 100%;
+        min-width: 0;
+        width: 100%;
+    }
+
+    .mobile-player {
+        overflow: hidden;
+        font-weight: 700;
+        min-width: 0;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .mobile-stat {
+        white-space: nowrap;
+    }
+
+    .mobile-stat small {
+        color: #7a8276;
+        display: block;
+        font-size: 0.65rem;
+        font-weight: 400;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+    }
+
+    .mobile-delete {
+        grid-column: 2 / -1;
+        width: 100%;
+    }
+
+    .match-form,
+    .player-form {
+        gap: 12px;
+    }
+
+    .team-fields {
+        grid-template-columns: 1fr;
+        gap: 10px;
+    }
+
+    .team-card {
+        padding: 10px;
+    }
+
+    .match-result {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .match-team {
+        flex-wrap: wrap;
+    }
+
+    .form-group {
+        gap: 7px;
+    }
+
+    .recent-matches {
+        max-height: none;
+        overflow: visible;
+    }
+
+    button:not(.delete-btn) {
+        width: 100%;
+    }
+
+    .season-tab {
+        width: auto !important;
     }
 }
 
@@ -190,7 +492,7 @@ button:disabled {
     color: white;
     padding: 5px 10px;
     border: none;
-    border-radius: 3px;
+    border-radius: 2px;
     font-size: 12px;
     cursor: pointer;
     transition: background 0.3s;
@@ -201,14 +503,34 @@ button:disabled {
 }
 
 .info-icon {
-    cursor: help;
+    background: transparent;
+    border: 0;
     color: #666;
-    font-size: 0.9em;
+    cursor: pointer;
+    display: inline-flex;
+    font-size: 0.85em;
+    justify-content: center;
+    align-items: center;
     margin-left: 5px;
+    min-height: 24px;
+    padding: 0;
+    width: 24px;
 }
 
 .info-icon:hover {
+    background: transparent;
     color: #333;
+}
+
+.info-icon:focus-visible,
+.info-close:focus-visible,
+.info-link:focus-visible {
+    outline: 2px solid #5d7c4f;
+    outline-offset: 2px;
+}
+
+.modal-open {
+    overflow: hidden;
 }
 
 .info-popup {
@@ -217,32 +539,80 @@ button:disabled {
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: rgba(20, 28, 17, 0.62);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 1000;
+    padding: 20px;
 }
 
 .info-content {
     background: white;
     padding: 20px;
-    border-radius: 10px;
-    max-width: 400px;
-    text-align: center;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+    max-width: 420px;
+    width: 100%;
+    text-align: left;
+    box-shadow: 0 12px 35px rgba(0, 0, 0, 0.28);
 }
 
-.info-content button {
-    margin-top: 15px;
-    padding: 8px 20px;
-    background: #5d7c4f;
-    color: white;
+.info-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+}
+
+.info-header h2 {
+    margin: 0;
+}
+
+.info-content p {
+    color: #555;
+    line-height: 1.5;
+    margin-bottom: 18px;
+}
+
+.info-close {
+    align-items: center;
+    background: #eef2ec;
     border: none;
-    border-radius: 5px;
+    color: #405b36;
     cursor: pointer;
+    display: flex;
+    flex: 0 0 40px;
+    font-family: sans-serif;
+    font-size: 26px;
+    justify-content: center;
+    min-height: 40px;
+    padding: 0;
+    width: 40px;
 }
 
-.info-content button:hover {
-    background: #4a6240;
+.info-close:hover {
+    background: #dde6d9;
+}
+
+.info-link {
+    color: #405b36;
+    font-weight: 700;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+}
+
+@media (max-width: 600px) {
+    .info-popup {
+        align-items: flex-end;
+        padding: 12px;
+    }
+
+    .info-content {
+        padding: 18px;
+    }
+
+    .info-close {
+        width: 40px !important;
+    }
 }
