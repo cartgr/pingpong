@@ -226,12 +226,45 @@ function renderSeasonTabs() {
     });
 }
 
+function renderSeasonPodium(players, isCurrentSeason) {
+    const podium = document.getElementById('seasonPodium');
+    const finalists = Object.entries(players)
+        .sort((a, b) => b[1].mu - a[1].mu || b[1].wins - a[1].wins || a[0].localeCompare(b[0]))
+        .slice(0, 3);
+
+    if (isCurrentSeason || finalists.length === 0) {
+        podium.hidden = true;
+        podium.innerHTML = '';
+        return;
+    }
+
+    const places = [
+        { finalist: finalists[1], place: 2, medal: '🥈', className: 'second' },
+        { finalist: finalists[0], place: 1, medal: '🥇', className: 'first' },
+        { finalist: finalists[2], place: 3, medal: '🥉', className: 'third' }
+    ].filter(entry => entry.finalist);
+
+    podium.innerHTML = `
+        <div class="podium-places">
+            ${places.map(({ finalist: [name, player], place, medal, className }) => `
+                <div class="podium-place ${className}">
+                    <span class="podium-medal" aria-hidden="true">${medal}</span>
+                    <strong title="${escapeHtml(name)}">${escapeHtml(name)}</strong>
+                    <span class="podium-skill">${formatTrueSkill(player.mu)} skill</span>
+                    <div class="podium-step" aria-label="${place}${place === 1 ? 'st' : place === 2 ? 'nd' : 'rd'} place">${place}</div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+    podium.hidden = false;
+}
+
 function updateRankings(players) {
     const rankingsDiv = document.getElementById('rankings');
     const entries = Object.entries(players);
 
     if (entries.length === 0) {
-        rankingsDiv.innerHTML = '<p>No players competed in this season.</p>';
+        rankingsDiv.innerHTML = '<p>No games yet :(</p>';
         return;
     }
 
@@ -291,20 +324,111 @@ function updateRankings(players) {
 }
 
 function updatePlayerOptions(players) {
-    const playerOptions = Object.keys(players)
-        .sort()
-        .map(name => `<option value="${escapeHtml(name)}"></option>`)
-        .join('');
-
-    document.getElementById('playerOptions').innerHTML = playerOptions;
+    document.querySelectorAll('.player-search').forEach(input => {
+        const selectedPlayer = input.dataset.selectedPlayer;
+        if (selectedPlayer && !players[selectedPlayer]) {
+            input.value = '';
+            delete input.dataset.selectedPlayer;
+        }
+        if (input.getAttribute('aria-expanded') === 'true') renderPlayerOptions(input);
+    });
 }
 
-function findPlayerName(value) {
-    const normalizedValue = String(value || '').trim().toLocaleLowerCase();
-    return Object.keys(appState.players).find(name =>
-        name.toLocaleLowerCase() === normalizedValue
+function closePlayerPicker(input) {
+    const options = input.parentElement.querySelector('.player-options');
+    options.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
+}
+
+function renderPlayerOptions(input) {
+    const options = input.parentElement.querySelector('.player-options');
+    const query = input.value.trim().toLocaleLowerCase();
+    const selectedElsewhere = new Set(
+        [...document.querySelectorAll('.player-search')]
+            .filter(otherInput => otherInput !== input)
+            .map(otherInput => otherInput.dataset.selectedPlayer)
+            .filter(Boolean)
     );
+    const matches = Object.keys(appState.players)
+        .filter(name => !selectedElsewhere.has(name))
+        .filter(name => name.toLocaleLowerCase().includes(query))
+        .sort((a, b) => {
+            const aStarts = a.toLocaleLowerCase().startsWith(query);
+            const bStarts = b.toLocaleLowerCase().startsWith(query);
+            return Number(bStarts) - Number(aStarts) || a.localeCompare(b);
+        });
+
+    options.innerHTML = '';
+    if (matches.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'player-option-empty';
+        empty.textContent = 'No matching players';
+        options.appendChild(empty);
+    } else {
+        matches.forEach(name => {
+            const option = document.createElement('button');
+            option.type = 'button';
+            option.className = 'player-option';
+            option.setAttribute('role', 'option');
+            option.textContent = name;
+            option.addEventListener('click', () => {
+                input.value = name;
+                input.dataset.selectedPlayer = name;
+                closePlayerPicker(input);
+                input.focus();
+            });
+            options.appendChild(option);
+        });
+    }
+
+    options.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
 }
+
+function getSelectedPlayer(inputId) {
+    const input = document.getElementById(inputId);
+    const selectedPlayer = input.dataset.selectedPlayer;
+    return selectedPlayer && input.value === selectedPlayer && appState.players[selectedPlayer]
+        ? selectedPlayer
+        : null;
+}
+
+function clearPlayerPicker(input) {
+    input.value = '';
+    delete input.dataset.selectedPlayer;
+    closePlayerPicker(input);
+}
+
+document.querySelectorAll('.player-search').forEach(input => {
+    input.addEventListener('focus', () => renderPlayerOptions(input));
+    input.addEventListener('input', () => {
+        delete input.dataset.selectedPlayer;
+        renderPlayerOptions(input);
+    });
+    input.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+            closePlayerPicker(input);
+            input.blur();
+        }
+        if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            input.parentElement.querySelector('.player-option')?.focus();
+        }
+    });
+});
+
+document.addEventListener('click', event => {
+    document.querySelectorAll('.player-picker').forEach(picker => {
+        if (!picker.contains(event.target)) closePlayerPicker(picker.querySelector('.player-search'));
+    });
+});
+
+document.addEventListener('focusin', event => {
+    if (event.target.matches('.player-option')) return;
+    document.querySelectorAll('.player-picker').forEach(picker => {
+        if (!picker.contains(event.target)) closePlayerPicker(picker.querySelector('.player-search'));
+    });
+});
 
 function formatSkillChange(change) {
     const rounded = Number(change).toFixed(2);
@@ -323,7 +447,7 @@ function formatMatchTeam(team, ratingChanges, resultClass) {
 function updateRecentMatches(matches) {
     const matchesDiv = document.getElementById('recentMatches');
     if (matches.length === 0) {
-        matchesDiv.innerHTML = '<p>No matches have been played in this season yet.</p>';
+        matchesDiv.innerHTML = '<p>No games yet :(</p>';
         return;
     }
 
@@ -362,6 +486,7 @@ function render() {
     }
 
     const season = calculateSeason(appState.selectedSeason);
+    const isCurrentSeason = appState.selectedSeason === getCurrentSeason();
 
     renderSeasonTabs();
     document.getElementById('activeSeasonDates').textContent = getSeasonDateLabel(appState.selectedSeason);
@@ -369,7 +494,14 @@ function render() {
     document.getElementById('seasonMatchCount').textContent = `${season.matches.length} ${season.matches.length === 1 ? 'match' : 'matches'}`;
     document.getElementById('matchesTitle').textContent = 'Season Matches';
     document.getElementById('submitMatchTitle').textContent = 'Submit Match Result';
+    document.getElementById('matchEntrySection').hidden = !isCurrentSeason;
+    document.getElementById('playerEntrySection').hidden = !isCurrentSeason;
 
+    if (!isCurrentSeason) {
+        document.querySelectorAll('.player-search').forEach(clearPlayerPicker);
+    }
+
+    renderSeasonPodium(season.players, isCurrentSeason);
     updateRankings(season.players);
     updateRecentMatches(season.matches);
     updatePlayerOptions(appState.players);
@@ -443,7 +575,7 @@ function setMatchType(matchType) {
         field.hidden = !isDoubles;
         const input = field.querySelector('input');
         input.required = isDoubles;
-        if (!isDoubles) input.value = '';
+        if (!isDoubles) clearPlayerPicker(input);
     });
     document.querySelector('label[for="winner1"]').textContent = isDoubles ? 'Player 1' : 'Player';
     document.querySelector('label[for="loser1"]').textContent = isDoubles ? 'Player 1' : 'Player';
@@ -455,13 +587,16 @@ document.querySelectorAll('[data-match-type]').forEach(button => {
 
 document.getElementById('matchForm').addEventListener('submit', async event => {
     event.preventDefault();
-    const formData = new FormData(event.target);
-    const winnerTeam = [findPlayerName(formData.get('winner1'))];
-    const loserTeam = [findPlayerName(formData.get('loser1'))];
+    if (appState.selectedSeason !== getCurrentSeason()) {
+        showMessage('Past seasons are view-only', 'error');
+        return;
+    }
+    const winnerTeam = [getSelectedPlayer('winner1')];
+    const loserTeam = [getSelectedPlayer('loser1')];
 
     if (appState.matchType === '2v2') {
-        winnerTeam.push(findPlayerName(formData.get('winner2')));
-        loserTeam.push(findPlayerName(formData.get('loser2')));
+        winnerTeam.push(getSelectedPlayer('winner2'));
+        loserTeam.push(getSelectedPlayer('loser2'));
     }
 
     const allPlayers = [...winnerTeam, ...loserTeam];
@@ -480,11 +615,18 @@ document.getElementById('matchForm').addEventListener('submit', async event => {
         winnerTeam,
         loserTeam
     });
-    if (submitted) event.target.reset();
+    if (submitted) {
+        event.target.reset();
+        document.querySelectorAll('.player-search').forEach(clearPlayerPicker);
+    }
 });
 
 document.getElementById('playerForm').addEventListener('submit', async event => {
     event.preventDefault();
+    if (appState.selectedSeason !== getCurrentSeason()) {
+        showMessage('Past seasons are view-only', 'error');
+        return;
+    }
     const formData = new FormData(event.target);
     const playerName = formData.get('playerName').trim();
 
