@@ -134,6 +134,122 @@ h2 {
     display: none;
 }
 
+.chart-card {
+    background: linear-gradient(180deg, #f6f8f2 0%, #edf2e7 100%);
+    border-radius: 8px;
+    box-shadow: inset 0 0 0 1px rgba(93, 124, 79, 0.14);
+    color: #2f3d2b;
+    padding: 18px 18px 14px;
+    position: relative;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.chart-card .loading {
+    color: #5d7c4f;
+}
+
+.rating-chart {
+    overflow: hidden;
+    position: relative;
+}
+
+.chart-svg {
+    display: block;
+    height: auto;
+    max-width: 100%;
+    width: 100%;
+}
+
+.chart-grid-line {
+    stroke: rgba(93, 124, 79, 0.18);
+    stroke-width: 1;
+}
+
+.chart-axis-line {
+    stroke: rgba(74, 98, 64, 0.42);
+    stroke-width: 1;
+}
+
+.chart-tick-label {
+    fill: #627159;
+    font-size: 12px;
+}
+
+.chart-axis-title {
+    fill: #2f3d2b;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.chart-point-label {
+    fill: #55614d;
+    font-size: 11px;
+}
+
+.chart-error-bar,
+.chart-error-cap {
+    stroke: #5d7c4f;
+    stroke-width: 2;
+}
+
+.chart-point {
+    fill: white;
+    stroke: #5d7c4f;
+    stroke-width: 2;
+}
+
+.chart-point-group {
+    cursor: pointer;
+    outline: none;
+}
+
+.chart-point-group.is-hovered,
+.chart-point-group:focus-visible {
+    filter: drop-shadow(0 0 8px rgba(93, 124, 79, 0.28));
+}
+
+.chart-point-group.is-hovered .chart-point,
+.chart-point-group:focus-visible .chart-point {
+    fill: #f4f7ef;
+    stroke: #4a6240;
+}
+
+.chart-point-hitbox {
+    fill: rgba(255, 255, 255, 0.001);
+    pointer-events: all;
+}
+
+.chart-tooltip {
+    background: rgba(51, 70, 45, 0.96);
+    border: 1px solid rgba(168, 192, 154, 0.55);
+    border-radius: 6px;
+    box-shadow: 0 12px 28px rgba(58, 74, 47, 0.28);
+    color: #f7fbf4;
+    left: 0;
+    max-width: 250px;
+    opacity: 0;
+    padding: 10px 12px;
+    pointer-events: none;
+    position: absolute;
+    top: 0;
+    transition: opacity 0.12s ease;
+    z-index: 2;
+}
+
+.chart-tooltip[hidden] {
+    display: none;
+}
+
+.chart-tooltip.is-visible {
+    opacity: 1;
+}
+
+.chart-tooltip strong {
+    display: block;
+    margin-bottom: 4px;
+}
+
 .season-podium {
     background: white;
     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
@@ -577,6 +693,10 @@ button:disabled {
     .section {
         padding: 14px;
         margin-bottom: 12px;
+    }
+
+    .chart-card {
+        padding: 14px 12px 12px;
     }
 
     .season-podium {

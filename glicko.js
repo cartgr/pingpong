@@ -6,6 +6,7 @@ const DYNAMICS_FACTOR = INITIAL_MU / 300;
 const SEASON_START_MONTH = 9;
 const HARVARD_TIME_ZONE = 'America/New_York';
 const RECENT_MATCH_LIMIT = 10;
+const CONFIDENCE_Z_SCORE = 1.96;
 
 const urlParams = new URLSearchParams(window.location.search);
 const isAdmin = urlParams.get('admin') === 'true';
@@ -101,6 +102,190 @@ function getMatchTeams(match) {
 
 function formatTrueSkill(value) {
     return Number(value).toFixed(2);
+}
+
+function getNiceTickStep(range, targetTickCount = 6) {
+    if (!Number.isFinite(range) || range <= 0) return 1;
+
+    const roughStep = range / Math.max(1, targetTickCount - 1);
+    const magnitude = 10 ** Math.floor(Math.log10(roughStep));
+    const residual = roughStep / magnitude;
+    const niceResidual = residual <= 1 ? 1 : residual <= 2 ? 2 : residual <= 5 ? 5 : 10;
+    return niceResidual * magnitude;
+}
+
+function getPlayerUncertaintyMetrics(player) {
+    return {
+        skill: player.mu,
+        sigma: player.sigma,
+        lowerBound: player.mu - CONFIDENCE_Z_SCORE * player.sigma,
+        upperBound: player.mu + CONFIDENCE_Z_SCORE * player.sigma
+    };
+}
+
+function updateRatingChart(players) {
+    const chart = document.getElementById('ratingChart');
+    const tooltip = document.getElementById('ratingChartTooltip');
+    if (!chart) return;
+
+    hideRatingChartTooltip();
+
+    const chartPlayers = Object.entries(players)
+        .map(([name, player]) => ({ name, ...getPlayerUncertaintyMetrics(player) }))
+        .sort((a, b) => b.skill - a.skill || a.name.localeCompare(b.name));
+
+    if (chartPlayers.length === 0) {
+        chart.innerHTML = '<p class="loading">Play a match to see rating uncertainty.</p>';
+        return;
+    }
+
+    const margin = { top: 26, right: 26, bottom: 175, left: 64 };
+    const height = 440;
+    const plotWidth = Math.max(560, chartPlayers.length * 58);
+    const width = margin.left + plotWidth + margin.right;
+    const plotLeft = margin.left;
+    const plotRight = width - margin.right;
+    const plotTop = margin.top;
+    const plotBottom = height - margin.bottom;
+    const plotHeight = plotBottom - plotTop;
+    const minValue = Math.min(...chartPlayers.map(player => player.lowerBound));
+    const maxValue = Math.max(...chartPlayers.map(player => player.upperBound));
+    const padding = Math.max(0.5, (maxValue - minValue) * 0.08);
+    const tickStep = getNiceTickStep(maxValue - minValue + 2 * padding);
+    const niceMin = Math.floor((minValue - padding) / tickStep) * tickStep;
+    const niceMax = Math.ceil((maxValue + padding) / tickStep) * tickStep;
+    const yRange = Math.max(tickStep, niceMax - niceMin);
+    // Treat each player as the center of an equal-width band so the first and
+    // last whiskers have the same breathing room as the players between them.
+    const xForIndex = index => plotLeft + ((index + 1) * plotWidth) / (chartPlayers.length + 1);
+    const yForValue = value => plotBottom - ((value - niceMin) / yRange) * plotHeight;
+
+    const ticks = [];
+    for (let value = niceMin; value <= niceMax + tickStep / 2; value += tickStep) {
+        ticks.push(value);
+    }
+
+    const gridLines = ticks.map(value => {
+        const y = yForValue(value);
+        return `
+            <g>
+                <line class="chart-grid-line" x1="${plotLeft}" y1="${y}" x2="${plotRight}" y2="${y}"></line>
+                <text class="chart-tick-label" x="${plotLeft - 12}" y="${y + 4}" text-anchor="end">${Number(value.toFixed(2))}</text>
+            </g>
+        `;
+    }).join('');
+
+    const verticalGuides = chartPlayers.map((player, index) => {
+        const x = xForIndex(index);
+        return `<line class="chart-grid-line" x1="${x}" y1="${plotTop}" x2="${x}" y2="${plotBottom}"></line>`;
+    }).join('');
+
+    const points = chartPlayers.map((player, index) => {
+        const x = xForIndex(index);
+        const skillY = yForValue(player.skill);
+        const upperY = yForValue(player.upperBound);
+        const lowerY = yForValue(player.lowerBound);
+        const labelX = x - 4;
+        const labelY = plotBottom + 10;
+        const ariaLabel = `${player.name}: skill ${formatTrueSkill(player.skill)}, 95% interval ${formatTrueSkill(player.lowerBound)} to ${formatTrueSkill(player.upperBound)}`;
+
+        return `
+            <g
+                class="chart-point-group"
+                tabindex="0"
+                role="graphics-symbol"
+                aria-label="${escapeHtml(ariaLabel)}"
+                data-player="${escapeHtml(player.name)}"
+                data-skill="${formatTrueSkill(player.skill)}"
+                data-sigma="${formatTrueSkill(player.sigma)}"
+                data-lower="${formatTrueSkill(player.lowerBound)}"
+                data-upper="${formatTrueSkill(player.upperBound)}"
+            >
+                <rect class="chart-point-hitbox" x="${x - 16}" y="${upperY - 8}" width="32" height="${lowerY - upperY + 16}" rx="8" ry="8"></rect>
+                <line class="chart-error-bar" x1="${x}" y1="${upperY}" x2="${x}" y2="${lowerY}"></line>
+                <line class="chart-error-cap" x1="${x - 7}" y1="${upperY}" x2="${x + 7}" y2="${upperY}"></line>
+                <line class="chart-error-cap" x1="${x - 7}" y1="${lowerY}" x2="${x + 7}" y2="${lowerY}"></line>
+                <circle class="chart-point" cx="${x}" cy="${skillY}" r="4.5"></circle>
+            </g>
+            <text class="chart-point-label" x="${labelX}" y="${labelY}" text-anchor="start" dominant-baseline="hanging" transform="rotate(63 ${labelX} ${labelY})">${escapeHtml(player.name)}</text>
+        `;
+    }).join('');
+
+    chart.innerHTML = `
+        <svg class="chart-svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="ratingChartTitle ratingChartDescription">
+            <title id="ratingChartTitle">Player TrueSkill estimates and uncertainty</title>
+            <desc id="ratingChartDescription">Points show skill estimates. Whiskers show approximate 95 percent intervals.</desc>
+            ${gridLines}
+            ${verticalGuides}
+            <line class="chart-axis-line" x1="${plotLeft}" y1="${plotBottom}" x2="${plotRight}" y2="${plotBottom}"></line>
+            <line class="chart-axis-line" x1="${plotLeft}" y1="${plotTop}" x2="${plotLeft}" y2="${plotBottom}"></line>
+            ${points}
+            <text class="chart-axis-title" x="${plotLeft + plotWidth / 2}" y="${height - 56}" text-anchor="middle">Players</text>
+            <text class="chart-axis-title" x="20" y="${plotTop + plotHeight / 2}" text-anchor="middle" transform="rotate(-90 20 ${plotTop + plotHeight / 2})">Skill (μ)</text>
+        </svg>
+    `;
+
+    attachRatingChartInteractions();
+    if (tooltip) tooltip.hidden = true;
+}
+
+function showRatingChartTooltip(group, event) {
+    const card = document.querySelector('.chart-card');
+    const tooltip = document.getElementById('ratingChartTooltip');
+    if (!card || !tooltip) return;
+
+    tooltip.innerHTML = `
+        <strong>${escapeHtml(group.dataset.player || '')}</strong>
+        <div>Skill: ${group.dataset.skill}</div>
+        <div>Uncertainty (σ): ${group.dataset.sigma}</div>
+        <div>95% interval: ${group.dataset.lower}–${group.dataset.upper}</div>
+    `;
+    tooltip.hidden = false;
+    tooltip.classList.add('is-visible');
+
+    const cardRect = card.getBoundingClientRect();
+    const tooltipWidth = tooltip.offsetWidth || 220;
+    const tooltipHeight = tooltip.offsetHeight || 100;
+    const pointerX = event?.clientX ?? cardRect.left + cardRect.width / 2;
+    const pointerY = event?.clientY ?? cardRect.top + cardRect.height / 2;
+    const maxLeft = Math.max(12, card.clientWidth - tooltipWidth - 12);
+    const left = Math.min(Math.max(12, pointerX - cardRect.left + 16), maxLeft);
+    const above = pointerY - cardRect.top - tooltipHeight - 12;
+    const top = above >= 12 ? above : pointerY - cardRect.top + 18;
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+}
+
+function hideRatingChartTooltip() {
+    const tooltip = document.getElementById('ratingChartTooltip');
+    if (!tooltip) return;
+    tooltip.classList.remove('is-visible');
+    tooltip.hidden = true;
+}
+
+function attachRatingChartInteractions() {
+    const chart = document.getElementById('ratingChart');
+    if (!chart) return;
+
+    chart.querySelectorAll('.chart-point-group').forEach(group => {
+        group.addEventListener('pointerenter', event => {
+            group.classList.add('is-hovered');
+            showRatingChartTooltip(group, event);
+        });
+        group.addEventListener('pointermove', event => showRatingChartTooltip(group, event));
+        group.addEventListener('pointerleave', () => {
+            group.classList.remove('is-hovered');
+            hideRatingChartTooltip();
+        });
+        group.addEventListener('focus', event => {
+            group.classList.add('is-hovered');
+            showRatingChartTooltip(group, event);
+        });
+        group.addEventListener('blur', () => {
+            group.classList.remove('is-hovered');
+            hideRatingChartTooltip();
+        });
+    });
 }
 
 function getHarvardDateParts(date) {
@@ -457,7 +642,7 @@ function updateRecentMatches(matches) {
     }
 
     // Match numbers are chronological within the selected season. Limit to the
-    // latest N first, then show that recent subset newest-first.
+    // latest N first, then apply the user's display sort to that recent subset.
     const numberedMatches = [...matches]
         .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
         .map((match, index) => ({ ...match, matchNumber: index + 1 }));
@@ -528,6 +713,7 @@ function render() {
     renderSeasonPodium(season.players, isCurrentSeason);
     updateRankings(season.players);
     updateRecentMatches(season.matches);
+    updateRatingChart(season.players);
     updatePlayerOptions(appState.players);
 }
 
