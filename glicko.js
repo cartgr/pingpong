@@ -5,6 +5,7 @@ const BETA = INITIAL_MU / 6;
 const DYNAMICS_FACTOR = INITIAL_MU / 300;
 const SEASON_START_MONTH = 9;
 const HARVARD_TIME_ZONE = 'America/New_York';
+const RECENT_MATCH_LIMIT = 10;
 
 const urlParams = new URLSearchParams(window.location.search);
 const isAdmin = urlParams.get('admin') === 'true';
@@ -14,6 +15,10 @@ const appState = {
     matches: {},
     selectedSeason: null,
     matchType: '1v1'
+};
+
+const matchHistoryState = {
+    limit: RECENT_MATCH_LIMIT
 };
 
 function normalPdf(value) {
@@ -451,8 +456,16 @@ function updateRecentMatches(matches) {
         return;
     }
 
-    const sortedMatches = [...matches].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-    matchesDiv.innerHTML = sortedMatches.map(match => {
+    // Match numbers are chronological within the selected season. Limit to the
+    // latest N first, then show that recent subset newest-first.
+    const numberedMatches = [...matches]
+        .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+        .map((match, index) => ({ ...match, matchNumber: index + 1 }));
+    const recentMatches = matchHistoryState.limit === 'all'
+        ? numberedMatches
+        : numberedMatches.slice(-matchHistoryState.limit);
+    const visibleMatches = [...recentMatches].reverse();
+    const rows = visibleMatches.map(match => {
         const date = new Date(match.timestamp).toLocaleDateString('en-US', {
             timeZone: HARVARD_TIME_ZONE,
             month: 'short',
@@ -465,19 +478,30 @@ function updateRecentMatches(matches) {
         const winnerDisplay = formatMatchTeam(match.winnerTeam, match.ratingChanges, 'positive');
         const loserDisplay = formatMatchTeam(match.loserTeam, match.ratingChanges, 'negative');
         return `
-            <div class="match-item">
-                <div class="match-result">
-                    <span class="match-team">${winnerDisplay}</span>
-                    <span class="match-outcome">defeated</span>
-                    <span class="match-team">${loserDisplay}</span>
-                </div>
-                <div class="match-meta">
-                    <span class="match-date">${date}</span>
-                    ${deleteButton}
-                </div>
-            </div>
+            <tr>
+                <td>${match.matchNumber}</td>
+                <td><span class="match-team">${winnerDisplay}</span></td>
+                <td><span class="match-team">${loserDisplay}</span></td>
+                <td class="match-date">${date}</td>
+                ${isAdmin ? `<td>${deleteButton}</td>` : ''}
+            </tr>
         `;
     }).join('');
+
+    matchesDiv.innerHTML = `
+        <table class="recent-matches-table">
+            <thead>
+                <tr>
+                    <th>Game</th>
+                    <th>Winner</th>
+                    <th>Loser</th>
+                    <th>Date</th>
+                    ${isAdmin ? '<th>Action</th>' : ''}
+                </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+        </table>
+    `;
 }
 
 function render() {
@@ -663,6 +687,73 @@ document.getElementById('rankings').addEventListener('click', event => {
 document.getElementById('recentMatches').addEventListener('click', event => {
     const button = event.target.closest('[data-delete-match]');
     if (button) window.deleteMatch(button.dataset.deleteMatch);
+});
+
+const recentMatchLimitPicker = document.querySelector('.recent-match-limit-picker');
+const recentMatchLimitButton = document.getElementById('recentMatchLimitButton');
+const recentMatchLimitOptions = document.getElementById('recentMatchLimitOptions');
+
+function closeRecentMatchLimitPicker() {
+    recentMatchLimitOptions.hidden = true;
+    recentMatchLimitButton.setAttribute('aria-expanded', 'false');
+}
+
+function openRecentMatchLimitPicker() {
+    recentMatchLimitOptions.hidden = false;
+    recentMatchLimitButton.setAttribute('aria-expanded', 'true');
+}
+
+recentMatchLimitButton.addEventListener('click', () => {
+    if (recentMatchLimitOptions.hidden) {
+        openRecentMatchLimitPicker();
+    } else {
+        closeRecentMatchLimitPicker();
+    }
+});
+
+recentMatchLimitButton.addEventListener('keydown', event => {
+    if (event.key !== 'ArrowDown') return;
+    event.preventDefault();
+    openRecentMatchLimitPicker();
+    recentMatchLimitOptions.querySelector('[aria-selected="true"]')?.focus();
+});
+
+recentMatchLimitOptions.addEventListener('click', event => {
+    const option = event.target.closest('[data-match-limit]');
+    if (!option) return;
+
+    const value = option.dataset.matchLimit;
+    matchHistoryState.limit = value === 'all' ? 'all' : Number(value);
+    document.getElementById('recentMatchLimitValue').textContent = option.textContent;
+    recentMatchLimitOptions.querySelectorAll('[data-match-limit]').forEach(candidate => {
+        candidate.setAttribute('aria-selected', String(candidate === option));
+    });
+    closeRecentMatchLimitPicker();
+    recentMatchLimitButton.focus();
+    updateRecentMatches(calculateSeason(appState.selectedSeason).matches);
+});
+
+recentMatchLimitOptions.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+        closeRecentMatchLimitPicker();
+        recentMatchLimitButton.focus();
+        return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+
+    event.preventDefault();
+    const options = [...recentMatchLimitOptions.querySelectorAll('[data-match-limit]')];
+    const currentIndex = options.indexOf(document.activeElement);
+    const offset = event.key === 'ArrowDown' ? 1 : -1;
+    options[(currentIndex + offset + options.length) % options.length].focus();
+});
+
+document.addEventListener('click', event => {
+    if (!recentMatchLimitPicker.contains(event.target)) closeRecentMatchLimitPicker();
+});
+
+document.addEventListener('focusin', event => {
+    if (!recentMatchLimitPicker.contains(event.target)) closeRecentMatchLimitPicker();
 });
 
 function showMessage(message, type = 'success') {
