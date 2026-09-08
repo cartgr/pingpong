@@ -13,6 +13,7 @@ body {
 
 .container {
     max-width: 800px;
+    min-width: 0;
     width: 100%;
     margin: 0 auto;
 }
@@ -36,6 +37,7 @@ h2 {
     padding: 20px;
     margin-bottom: 20px;
     box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    min-width: 0;
 }
 
 .season-bar {
@@ -360,6 +362,7 @@ select {
     padding: 10px;
     border: 1px solid #ddd;
     border-radius: 3px;
+    font-family: inherit;
     font-size: 16px;
     min-height: 44px;
 }
@@ -416,7 +419,95 @@ button:disabled {
 
 .recent-matches {
     max-height: 420px;
-    overflow-y: auto;
+    max-width: 100%;
+    overflow: auto;
+    width: 100%;
+}
+
+.match-history-heading {
+    margin-bottom: 15px;
+    min-width: 0;
+}
+
+.recent-matches-controls {
+    align-items: center;
+    display: flex;
+    gap: 8px;
+}
+
+.recent-matches-controls > span {
+    color: #666;
+    font-size: 0.9rem;
+}
+
+.recent-match-limit-picker {
+    min-width: 116px;
+    position: relative;
+}
+
+.recent-match-limit-button {
+    align-items: center;
+    background: white;
+    border: 1px solid #ddd;
+    color: #333;
+    display: flex;
+    justify-content: space-between;
+    min-height: 40px;
+    padding: 7px 10px;
+    width: 100%;
+}
+
+.recent-match-limit-button:hover,
+.recent-match-limit-button[aria-expanded="true"] {
+    background: #f7faf5;
+    border-color: #bcc9b7;
+}
+
+.recent-match-limit-button:focus-visible {
+    outline: 2px solid #5d7c4f;
+    outline-offset: 2px;
+}
+
+.dropdown-caret {
+    color: #5d7c4f;
+    margin-left: 12px;
+}
+
+.recent-match-limit-options {
+    left: auto;
+    min-width: 140px;
+    right: 0;
+}
+
+.recent-match-limit-options .player-option[aria-selected="true"] {
+    background: #edf3ea;
+    color: #273622;
+    font-weight: 700;
+}
+
+.recent-matches-table {
+    border-collapse: collapse;
+    min-width: 620px;
+    width: 100%;
+}
+
+.recent-matches-table th,
+.recent-matches-table td {
+    border-bottom: 1px solid #eee;
+    padding: 10px;
+    text-align: left;
+    vertical-align: middle;
+}
+
+.recent-matches-table th {
+    background: #f5f5f5;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.recent-matches-table tbody tr:hover {
+    background: #f9f9f9;
 }
 
 .match-item {
@@ -510,6 +601,14 @@ button:disabled {
         align-items: flex-start;
         flex-direction: column;
         gap: 4px;
+    }
+
+    .match-history-heading {
+        align-items: stretch;
+    }
+
+    .recent-matches-controls {
+        justify-content: space-between;
     }
 
     .season-bar-inner {
@@ -616,7 +715,8 @@ button:disabled {
 
     .recent-matches {
         max-height: none;
-        overflow: visible;
+        overflow-x: auto;
+        overflow-y: visible;
     }
 
     button:not(.delete-btn) {

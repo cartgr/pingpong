@@ -96,7 +96,34 @@
         </div>
 
         <div class="section">
-            <h2 id="matchesTitle">Season Matches</h2>
+            <div class="section-heading match-history-heading">
+                <h2 id="matchesTitle">Season Matches</h2>
+                <div class="recent-matches-controls">
+                    <span id="recentMatchLimitLabel">Show</span>
+                    <div class="recent-match-limit-picker">
+                        <button
+                            type="button"
+                            id="recentMatchLimitButton"
+                            class="recent-match-limit-button"
+                            aria-haspopup="listbox"
+                            aria-expanded="false"
+                            aria-labelledby="recentMatchLimitLabel recentMatchLimitValue"
+                        >
+                            <span id="recentMatchLimitValue">Last 10</span>
+                            <span class="dropdown-caret" aria-hidden="true">▾</span>
+                        </button>
+                        <div id="recentMatchLimitOptions" class="player-options recent-match-limit-options" role="listbox" aria-labelledby="recentMatchLimitLabel" hidden>
+                            <button type="button" class="player-option" role="option" data-match-limit="5">Last 5</button>
+                            <button type="button" class="player-option" role="option" data-match-limit="10" aria-selected="true">Last 10</button>
+                            <button type="button" class="player-option" role="option" data-match-limit="15">Last 15</button>
+                            <button type="button" class="player-option" role="option" data-match-limit="20">Last 20</button>
+                            <button type="button" class="player-option" role="option" data-match-limit="50">Last 50</button>
+                            <button type="button" class="player-option" role="option" data-match-limit="100">Last 100</button>
+                            <button type="button" class="player-option" role="option" data-match-limit="all">All</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
             <div id="recentMatches" class="recent-matches">
                 <div class="loading">Loading matches...</div>
             </div>
